@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { defaultBuilding, buildingSchema, buildingMetrics, billOfMaterials, constructionTakeoff, sideWallPanels, longitudinalMembers, parseDesignCommand } from '../shared/model.js';
 import { constructionCsv, parseProject } from '../src/files.js';
 import { createApp } from '../server/index.js';
+import { provisionInitialAdmin } from '../server/accounts.js';
 
 const hillside = () => buildingSchema.parse({ ...defaultBuilding, site: { ...defaultBuilding.site, endElevation: 6 }, construction: { ...defaultBuilding.construction, wallMode: 'concrete', columnMode: 'wall-top' } });
 
@@ -96,8 +97,9 @@ test('construction parameters persist in projects and cubic-yard prices update t
     return { status: response.status, cookie: response.headers.get('set-cookie')?.split(';')[0], data: await response.json() };
   }
   try {
-    const account = await request('/auth/register', { name: 'Construction Tester', email: 'construction@example.test', password: 'isolated-construction-password' });
-    assert.equal(account.status, 201);
+    await provisionInitialAdmin(db, { name: 'Construction Tester', email: 'construction@example.test', password: 'isolated-construction-password' });
+    const account = await request('/auth/login', { email: 'construction@example.test', password: 'isolated-construction-password' });
+    assert.equal(account.status, 200);
     cookie = account.cookie;
     const saved = await request('/projects', { building: hillside() });
     assert.equal(saved.status, 200);
@@ -112,6 +114,6 @@ test('construction parameters persist in projects and cubic-yard prices update t
     assert.equal(line.unit, 'cu yd');
     assert.equal(line.price, 185.75);
     assert.ok(Math.abs(line.total - constructionTakeoff(restored).concreteVolume * 185.75) < 1e-8);
-    assert.equal((await request('/inventory', { ...concrete, unit: 'unknown unit' })).status, 400);
+    assert.equal((await request('/inventory', { ...concrete, unit: '' })).status, 400);
   } finally { await new Promise(resolve => server.close(resolve)); db.close(); }
 });

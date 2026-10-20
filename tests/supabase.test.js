@@ -1,0 +1,58 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+
+test('Supabase migration enforces closed access, contact/cost privacy, and atomic import permissions', async () => {
+  const db = new PGlite();
+  const admin = '00000000-0000-4000-8000-000000000001';
+  const viewer = '00000000-0000-4000-8000-000000000002';
+  const outsider = '00000000-0000-4000-8000-000000000003';
+  try {
+    await db.exec(`create role anon; create role authenticated; create role service_role bypassrls;
+      create schema auth; create table auth.users(id uuid primary key);
+      create table auth.mfa_factors(user_id uuid, status text);
+      create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
+      create function auth.jwt() returns jsonb language sql stable as $$ select jsonb_build_object('aal',coalesce(nullif(current_setting('request.jwt.claim.aal',true),''),'aal1')) $$;
+      grant usage on schema auth to authenticated; grant execute on function auth.uid() to authenticated;
+      insert into auth.users values('${admin}'),('${viewer}'),('${outsider}');`);
+    await db.exec(await readFile(new URL('../supabase/migrations/202610200001_workspace.sql', import.meta.url), 'utf8'));
+    await db.exec(`insert into profiles(id,name,email,role,address) values('${admin}','Admin User','admin@test.com','admin','Private admin address'),('${viewer}','Viewer User','viewer@test.com','viewer','Private viewer address');
+      insert into inventory values('P-1','Part','Steel','ea',10,2,'Bin A','Supplier'); insert into inventory_costs values('P-1',125);
+      set role authenticated; select set_config('request.jwt.claim.sub','${viewer}',false);`);
+    assert.equal((await db.query('select * from profiles')).rows.length, 1);
+    assert.equal((await db.query('select * from inventory_costs')).rows.length, 0);
+    assert.equal((await db.query('select * from staff_directory')).rows.length, 2);
+    await assert.rejects(() => db.query(`update profiles set role='admin' where id='${viewer}'`), /permission denied/);
+    await assert.rejects(() => db.query(`select save_inventory('{"id":"P-2"}')`), /does not permit/);
+    await db.exec(`select set_config('request.jwt.claim.sub','${outsider}',false);`);
+    assert.equal((await db.query('select * from inventory')).rows.length, 0);
+    await db.exec(`select set_config('request.jwt.claim.sub','${admin}',false);`);
+    assert.equal((await db.query('select * from inventory_costs')).rows.length, 1);
+    const item = { id: 'NEW-1', name: 'New item', category: 'Custom category', unit: 'box', stock: 9, price: null, reorder: 0, location: '', supplier: '' };
+    await db.query('select save_inventory($1::jsonb)', [JSON.stringify(item)]);
+    assert.equal((await db.query("select stock from inventory where id='NEW-1'")).rows[0].stock, '9');
+    await db.exec(`reset role; insert into auth.mfa_factors values('${viewer}','verified'); set role authenticated; select set_config('request.jwt.claim.sub','${viewer}',false);`);
+    assert.equal((await db.query('select * from inventory')).rows.length, 0);
+    await db.exec("select set_config('request.jwt.claim.aal','aal2',false)");
+    assert.ok((await db.query('select * from inventory')).rows.length > 0);
+    await db.exec('reset role');
+    const payload = { fileName: 'parts.csv', counts: { add: 1, update: 1, skip: 0, error: 0 }, rows: [{ before: { ...item, stock: 999 }, item: { ...item, stock: 20 } }, { before: null, item: { ...item, id: 'NEW-2' } }] };
+    await db.query('insert into inventory_imports(id,actor,payload,expires) values($1,$2,$3,now()+interval \'15 minutes\')', ['00000000-0000-4000-8000-000000000010', admin, JSON.stringify(payload)]);
+    await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub','${admin}',false);`);
+    await assert.rejects(() => db.query("select apply_inventory_import('00000000-0000-4000-8000-000000000010')"), /Inventory changed/);
+    assert.equal((await db.query("select * from inventory where id='NEW-2'")).rows.length, 0);
+    await db.exec('reset role');
+    await db.query('update inventory_imports set payload=$1 where id=$2', [JSON.stringify({ ...payload, rows: [{ before: item, item: { ...item, stock: 20 } }, payload.rows[1]] }), '00000000-0000-4000-8000-000000000010']);
+    await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub','${admin}',false);`);
+    await db.query("select apply_inventory_import('00000000-0000-4000-8000-000000000010')");
+    assert.equal((await db.query("select * from inventory where id='NEW-2'")).rows.length, 1);
+    await assert.rejects(() => db.query("select apply_inventory_import('00000000-0000-4000-8000-000000000010')"), /already applied/);
+    await db.exec('reset role');
+    await db.query('update profiles set disabled=true where id=$1', [viewer]);
+    await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub','${viewer}',false);`);
+    assert.equal((await db.query('select * from inventory')).rows.length, 0);
+    await db.exec('reset role; set role anon');
+    await assert.rejects(() => db.query('select * from inventory'), /permission denied/);
+  } finally { await db.close(); }
+});

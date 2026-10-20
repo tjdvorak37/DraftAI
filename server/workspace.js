@@ -6,6 +6,7 @@ export function registerWorkspace({ app, db, allow, audit, publicUser, seal, uns
     if (!db.prepare(`PRAGMA table_info(${table})`).all().some(item => item.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${sql}`);
   };
   addColumn('users', 'disabled', 'INTEGER NOT NULL DEFAULT 0');
+  for (const column of ['address', 'phone', 'department', 'job_title']) addColumn('users', column, "TEXT NOT NULL DEFAULT ''");
   for (const [column, sql] of Object.entries({ client: "TEXT NOT NULL DEFAULT ''", location: "TEXT NOT NULL DEFAULT ''", status: "TEXT NOT NULL DEFAULT 'Planning'", owner: 'INTEGER', due_date: "TEXT NOT NULL DEFAULT ''", notes: "TEXT NOT NULL DEFAULT ''", revision: 'INTEGER NOT NULL DEFAULT 1' })) addColumn('projects', column, sql);
   db.exec(`CREATE TABLE IF NOT EXISTS settings (id TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, priority TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'Open', reporter INTEGER NOT NULL, assignee INTEGER, project_id INTEGER, created TEXT NOT NULL, updated TEXT NOT NULL);
@@ -14,7 +15,7 @@ export function registerWorkspace({ app, db, allow, audit, publicUser, seal, uns
   const saveSetting = (id, value) => db.prepare('INSERT INTO settings VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value').run(id, value);
   const aiConfig = () => ({ key: setting('openai_key') ? unseal(setting('openai_key')) : process.env.OPENAI_API_KEY || '', model: setting('openai_model', process.env.OPENAI_MODEL || 'gpt-4o-mini'), enabled: setting('openai_enabled', 'true') === 'true' });
   const workspaceSettings = () => ({ name: setting('workspace_name', 'Accu-Steel workspace'), supportEmail: setting('support_email'), aiConnected: Boolean(aiConfig().key && aiConfig().enabled) });
-  app.get('/api/workspace', (req, res) => res.json(workspaceSettings()));
+  app.get('/api/workspace', allow(), (req, res) => res.json(workspaceSettings()));
   app.get('/api/admin', allow('admin'), (req, res) => {
     const config = aiConfig();
     res.json({ ...workspaceSettings(), integrations: { openai: { configured: Boolean(config.key), enabled: config.enabled, model: config.model, source: setting('openai_key') ? 'workspace' : process.env.OPENAI_API_KEY ? 'environment' : 'none' } }, counts: { users: db.prepare('SELECT COUNT(*) AS total FROM users WHERE disabled=0').get().total, projects: db.prepare('SELECT COUNT(*) AS total FROM projects').get().total, tickets: db.prepare("SELECT COUNT(*) AS total FROM tickets WHERE status NOT IN ('Resolved','Closed')").get().total }, audit: db.prepare('SELECT audit.id, audit.action, audit.detail, audit.created, users.name AS actor_name FROM audit LEFT JOIN users ON users.id=audit.actor ORDER BY audit.id DESC LIMIT 60').all() });

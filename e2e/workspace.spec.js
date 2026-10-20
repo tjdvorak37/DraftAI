@@ -5,6 +5,27 @@ import { defaultBuilding } from '../shared/model.js';
 import { exportDxf } from '../src/files.js';
 import { readFile } from 'node:fs/promises';
 
+test.beforeEach(async ({ page }, info) => {
+  if (!info.title.startsWith('login is required') && !info.title.startsWith('account setup')) {
+    const login = await page.request.post('/api/auth/login', { data: { email: 'studio@example.test', password: 'isolated-test-password' } });
+    expect(login.ok()).toBe(true);
+  }
+});
+
+test('login is required before the workspace is rendered on desktop and mobile', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Workspace' })).toHaveCount(0);
+  await expect(page.locator('canvas')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Create workspace', exact: true })).toHaveCount(0);
+  await expect(page.getByText('Access is assigned by management.', { exact: false })).toBeVisible();
+  expect((await page.request.post('/api/auth/register', { data: { name: 'Unauthorized' } })).status()).toBe(403);
+  await page.screenshot({ path: '/tmp/accusteel-login.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: '/tmp/accusteel-login-mobile.png', fullPage: true });
+});
+
 async function canvasSignature(page) {
   const { data: pixels } = PNG.sync.read(await page.locator('canvas').screenshot());
   const colors = new Set();
@@ -99,7 +120,7 @@ test('mobile and wide layouts keep the scene, panels, and navigation usable', as
   await page.getByRole('textbox', { name: 'Search inventory' }).fill('fabric');
   await expect(page.locator('.inventory-table tbody tr')).toHaveCount(1);
   await page.getByRole('button', { name: 'Projects', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'A place for all your plans.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your first project starts here.' })).toBeVisible();
   await page.getByRole('button', { name: 'Design', exact: true }).click();
   await page.setViewportSize({ width: 320, height: 740 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -172,15 +193,63 @@ test('terrain adaptation changes real walls, material quantities, and the saved 
   expect(errors).toEqual([]);
 });
 
+test('inventory CSV and Excel imports preview, preserve custom data, and apply only after confirmation', async ({ page }) => {
+  test.setTimeout(180000);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Inventory', exact: true }).click();
+  await page.getByRole('button', { name: 'Import inventory', exact: true }).click();
+  const csv = 'SKU,Description,Count,Category,UOM,Unit Cost,Location,Supplier\nWH/001,Custom bracket,24,Fasteners,box,12.50,Bin A,Iowa Vendor\nWH/002,Unpriced plate,0,Plate stock,kg,,Bin B,Iowa Vendor';
+  await page.getByLabel('Choose inventory import file').setInputFiles({ name: 'warehouse.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+  await expect(page.getByRole('combobox', { name: 'Map Part ID / SKU', exact: true })).toHaveValue('0');
+  await page.getByRole('button', { name: 'Preview inventory changes', exact: true }).click();
+  await expect(page.locator('.import-counts')).toContainText('New parts2');
+  expect((await (await page.request.get('/api/inventory')).json()).some(item => item.id === 'WH/001')).toBe(false);
+  await expect(page.getByRole('button', { name: 'Apply inventory import', exact: true })).toBeDisabled();
+  await page.getByLabel('Confirm inventory changes', { exact: true }).check();
+  await page.screenshot({ path: '/tmp/accusteel-inventory-preview.png', fullPage: true });
+  await page.getByRole('button', { name: 'Apply inventory import', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Filter inventory category', exact: true }).selectOption('Fasteners');
+  await expect(page.locator('.inventory-table tbody tr')).toHaveCount(1);
+  await expect(page.locator('.inventory-table tbody tr')).toContainText('Bin A');
+  await page.getByRole('button', { name: 'Edit Custom bracket', exact: true }).click();
+  await expect(page.getByLabel('Part unit', { exact: true })).toHaveValue('box');
+  await expect(page.getByLabel('Storage location', { exact: true })).toHaveValue('Bin A');
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.getByRole('button', { name: 'Import inventory', exact: true }).click();
+  const module = await import('exceljs');
+  const Workbook = module.Workbook || module.default.Workbook;
+  const workbook = new Workbook();
+  workbook.addWorksheet('Ignore').addRows([['SKU', 'Count'], ['IGNORE-1', 1]]);
+  workbook.addWorksheet('Counts').addRows([['SKU', 'Count'], ['WH/001', 31]]);
+  const spreadsheet = Buffer.from(await workbook.xlsx.writeBuffer());
+  await page.getByLabel('Choose inventory import file').setInputFiles({ name: 'counts.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: spreadsheet });
+  await page.getByRole('combobox', { name: 'Inventory worksheet', exact: true }).selectOption('1');
+  await page.getByRole('combobox', { name: 'Inventory import mode', exact: true }).selectOption('update');
+  await page.getByRole('button', { name: 'Preview inventory changes', exact: true }).click();
+  await expect(page.locator('.import-counts')).toContainText('Updates1');
+  await page.getByLabel('Confirm inventory changes', { exact: true }).check();
+  await page.getByRole('button', { name: 'Apply inventory import', exact: true }).click();
+  const imported = (await (await page.request.get('/api/inventory')).json()).find(item => item.id === 'WH/001');
+  expect(imported.stock).toBe(31);
+  expect(imported.price).toBe(12.5);
+  expect(imported.category).toBe('Fasteners');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Import inventory', exact: true }).click();
+  await page.getByLabel('Choose inventory import file').setInputFiles({ name: 'duplicates.csv', mimeType: 'text/csv', buffer: Buffer.from('SKU,Description,Count\nDUP,Duplicate,1\nDUP,Duplicate,2') });
+  await page.getByRole('button', { name: 'Preview inventory changes', exact: true }).click();
+  await expect(page.locator('.import-counts')).toContainText('Errors2');
+  await expect(page.getByRole('button', { name: 'Apply inventory import', exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: '/tmp/accusteel-import-mobile.png', fullPage: true });
+});
+
 test('account setup, persistent projects, custom prices, and two-factor sign-in', async ({ page }) => {
   test.setTimeout(240000);
   await page.goto('/');
-  await expect.poll(async () => (await page.request.get('/api/auth')).json().then(data => data.setupRequired)).toBe(true);
-  await page.getByRole('banner').getByRole('button', { name: 'Sign in', exact: true }).click();
-  await page.getByLabel('Full name', { exact: true }).fill('Studio Tester');
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
   await page.getByLabel('Work email').fill('studio@example.test');
   await page.getByLabel('Password', { exact: true }).fill('isolated-test-password');
-  await page.getByRole('button', { name: 'Create workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.locator('.account-button')).toBeVisible();
   await page.getByRole('button', { name: 'Save project', exact: true }).click();
   await expect(page.locator('.save-state')).toHaveText('Saved to workspace');
@@ -205,9 +274,19 @@ test('account setup, persistent projects, custom prices, and two-factor sign-in'
   await page.getByLabel('Work email', { exact: true }).fill('manager@example.test');
   await page.getByLabel('Initial password', { exact: true }).fill('isolated-manager-password');
   await page.getByLabel('Workspace role', { exact: true }).selectOption('manager');
+  await page.getByLabel('Address', { exact: true }).fill('123 Staff Street, Audubon, IA');
+  await page.getByLabel('Phone number', { exact: true }).fill('+1 555 010 0130');
+  await page.getByLabel('Department', { exact: true }).fill('Operations');
+  await page.getByLabel('Job title', { exact: true }).fill('Project Manager');
   await page.getByRole('button', { name: 'Create account', exact: true }).click();
   await expect(page.locator('.people-table tbody tr')).toHaveCount(2);
+  await page.getByRole('button', { name: 'Edit profile for Operations Manager', exact: true }).click();
+  await expect(page.getByLabel('Phone number', { exact: true })).toHaveValue('+1 555 010 0130');
+  await page.getByLabel('Address', { exact: true }).fill('456 Management Avenue');
+  await page.getByRole('button', { name: 'Save profile', exact: true }).click();
   await page.getByRole('tab', { name: 'Integrations', exact: true }).click();
+  await expect(page.getByText('SMS management', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('EchoAIPro', { exact: true })).toHaveCount(0);
   await page.getByLabel('API key', { exact: true }).fill('test-only-not-a-real-provider-key');
   await page.getByLabel('Enable AI design requests', { exact: true }).uncheck();
   await page.getByRole('button', { name: 'Save connection', exact: true }).click();
@@ -270,7 +349,7 @@ test('account setup, persistent projects, custom prices, and two-factor sign-in'
   await page.getByRole('button', { name: 'Verify & enable' }).click();
   await expect(page.locator('.security-status')).toContainText('Enabled');
   await page.getByRole('button', { name: 'Sign out of workspace', exact: true }).click();
-  await page.getByRole('banner').getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
   await page.getByLabel('Work email').fill('studio@example.test');
   await page.getByLabel('Password', { exact: true }).fill('isolated-test-password');
   await page.getByRole('button', { name: 'Sign in', exact: true }).last().click();

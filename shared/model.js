@@ -89,7 +89,7 @@ export function billOfMaterials(building, inventory = initialInventory) {
   const customFrames = takeoff.columnReduction > 0;
   const quantities = [customFrames ? 0 : metrics.frames, takeoff.adapted ? 0 : metrics.bays * 10, metrics.fabricArea, metrics.frames * 2, metrics.frames * 2, Math.max(4, Math.ceil(metrics.bays / 3) * 2), building.endWalls && building.doorWidth > 0 ? 1 : 0, customFrames ? metrics.frames : 0, takeoff.concreteVolume, takeoff.adapted ? takeoff.cutVolume : 0, takeoff.adapted && building.construction.fillMaterial === 'stone' ? takeoff.orderedFillVolume : 0, takeoff.adapted && building.construction.fillMaterial === 'engineered-fill' ? takeoff.orderedFillVolume : 0, takeoff.adapted ? longitudinalMembers(building).reduce((sum, member) => sum + member.length, 0) : 0];
   return initialInventory.map((part, index) => {
-    const current = inventory.find(item => item.id === part.id) || part;
+    const current = inventory.find(item => item.id === part.id) || { ...part, price: null, stock: 0 };
     return { ...current, quantity: quantities[index], total: current.price == null ? null : quantities[index] * current.price };
   }).filter(part => part.quantity > 0);
 }

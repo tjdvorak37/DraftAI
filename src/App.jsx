@@ -9,6 +9,25 @@ import { AdminCenter, ProjectCenter, SupportCenter } from './WorkspacePages.jsx'
 import { roles, designRoles, costRoles } from '../shared/access.js';
 import SiteControls, { describeDesignValue } from './SiteControls.jsx';
 import ConstructionReport from './ConstructionReport.jsx';
+import LoginPage from './LoginPage.jsx';
+import InventoryImport from './InventoryImport.jsx';
+import { inventoryCsv } from './inventoryFiles.js';
+
+function InventoryPage({ inventory, user, onEdit, onAdd, onExport, onImport }) {
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('All parts');
+  const canEdit = ['admin', 'estimator'].includes(user.role);
+  const visible = inventory.filter(item => `${item.name} ${item.id} ${item.location || ''} ${item.supplier || ''}`.toLowerCase().includes(search.toLowerCase()) && (category === 'All parts' || item.category === category));
+  const value = inventory.reduce((sum, item) => sum + item.stock * (item.price || 0), 0);
+  return <main className="management-page">
+    <div className="page-eyebrow">WORKSPACE / MATERIALS</div>
+    <div className="page-title"><div><h1>Inventory</h1><p>Every component. Every cost. In one place.</p></div><div className="button-group"><button className="button" onClick={onExport}><Download size={16} /> Export sheet</button><button className="button" onClick={onImport} disabled={!canEdit}><FileUp size={16} /> Import inventory</button><button className="button primary" onClick={onAdd} disabled={!canEdit}><Plus size={17} /> Add part</button></div></div>
+    <div className="inventory-metrics"><div><span>Catalog parts</span><strong>{inventory.length}<small>active items</small></strong></div><div><span>Inventory value</span><strong>{!costRoles.includes(user.role) ? 'Restricted' : money(value)}<small>priced stock only</small></strong></div><div><span>Below reorder point</span><strong className="amber-text">{inventory.filter(item => item.stock < item.reorder).length}<small>parts need attention</small></strong></div><div><span>Awaiting pricing</span><strong>{inventory.filter(item => item.price == null).length}<small>custom or unpriced parts</small></strong></div></div>
+    <div className="table-toolbar"><div className="search-field"><Search size={16} /><input aria-label="Search inventory" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search part name, ID, or location…" /></div><select aria-label="Filter inventory category" value={category} onChange={event => setCategory(event.target.value)}>{['All parts', ...[...new Set(inventory.map(item => item.category))].sort()].map(item => <option key={item}>{item}</option>)}</select><span>{visible.length} parts</span></div>
+    <div className="table-scroll"><table className="inventory-table"><thead><tr><th>PART / DESCRIPTION</th><th>CATEGORY</th><th>ON HAND</th><th>UNIT COST</th><th>STOCK VALUE</th><th>STATUS</th><th></th></tr></thead><tbody>{visible.map(item => <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id} · {item.unit}{item.location ? ` · ${item.location}` : ''}</small>{item.supplier && <small>{item.supplier}</small>}</td><td><span className="category-label">{item.category}</span></td><td>{number(item.stock)} <span className="muted">{item.unit}</span></td><td>{!costRoles.includes(user.role) ? 'Restricted' : money(item.price)}</td><td>{item.price == null ? '—' : money(item.stock * item.price)}</td><td><span className={`stock-label ${item.stock < item.reorder ? 'low' : item.price == null ? 'unpriced' : ''}`}><i />{item.stock < item.reorder ? 'Low stock' : item.price == null ? 'Needs pricing' : 'In stock'}</span></td><td><IconButton icon={Settings2} label={`Edit ${item.name}`} disabled={!canEdit} onClick={() => onEdit(item)} /></td></tr>)}</tbody></table>{!visible.length && <div className="empty-state"><Search size={30} /><h3>No matching parts</h3><p>Try another part name or category.</p><button className="button" onClick={() => { setSearch(''); setCategory('All parts'); }}>Clear filters</button></div>}</div>
+    <p className="table-footnote">Stock is tracked independently from project estimates. Saving a design does not reserve or consume inventory.</p>
+  </main>;
+}
 
 const money = value => value == null ? 'Not priced' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: Number.isInteger(value) ? 0 : 2, maximumFractionDigits: 2 }).format(value);
 const number = value => new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 }).format(value);
@@ -73,9 +92,10 @@ function PartDialog({ part, onClose, onSave }) {
   };
   return <Modal title={part ? 'Edit inventory part' : 'Add inventory part'} subtitle="Unknown costs stay blank, not zero." onClose={onClose}>
     <form className="form-stack" onSubmit={submit}>
-      <div className="form-grid"><label>Part ID<input name="id" defaultValue={part?.id} pattern="[A-Za-z0-9-]{2,24}" readOnly={Boolean(part)} required placeholder="CP-008" /></label><label>Category<select aria-label="Part category" name="category" defaultValue={part?.category || 'Custom'}>{['Structural', 'Covering', 'Hardware', 'Custom'].map(value => <option key={value}>{value}</option>)}</select></label></div>
+      <div className="form-grid"><label>Part ID<input name="id" defaultValue={part?.id} pattern="[A-Za-z0-9][A-Za-z0-9._/ -]{0,63}" maxLength={64} readOnly={Boolean(part)} required placeholder="CP-008" /></label><label>Category<input aria-label="Part category" name="category" defaultValue={part?.category || 'Custom'} maxLength={80} required /></label></div>
       <label>Description<input name="name" defaultValue={part?.name} required maxLength={120} placeholder="Custom fabricated bracket" /></label>
-      <div className="form-grid"><label>Unit<select aria-label="Part unit" name="unit" defaultValue={part?.unit || 'ea'}>{['ea', 'kit', 'sq ft', 'ft', 'cu yd'].map(value => <option key={value}>{value}</option>)}</select></label><label>Unit cost ($)<input name="price" type="number" min="0" step="0.01" defaultValue={part?.price ?? ''} placeholder="Not yet priced" /></label><label>On hand<input name="stock" type="number" min="0" step="0.01" defaultValue={part?.stock ?? 0} required /></label><label>Reorder point<input name="reorder" type="number" min="0" step="0.01" defaultValue={part?.reorder ?? 0} required /></label></div>
+      <div className="form-grid"><label>Unit<input aria-label="Part unit" name="unit" defaultValue={part?.unit || 'ea'} maxLength={24} required /></label><label>Unit cost ($)<input name="price" type="number" min="0" step="0.01" defaultValue={part?.price ?? ''} placeholder="Not yet priced" /></label><label>On hand<input name="stock" type="number" min="0" step="0.01" defaultValue={part?.stock ?? 0} required /></label><label>Reorder point<input name="reorder" type="number" min="0" step="0.01" defaultValue={part?.reorder ?? 0} required /></label></div>
+      <label>Storage location<input name="location" defaultValue={part?.location || ''} maxLength={160} /></label><label>Supplier<input name="supplier" defaultValue={part?.supplier || ''} maxLength={160} /></label>
       {error && <p className="form-error">{error}</p>}<button className="button primary full" disabled={busy}><Save size={16} /> Save part</button>
     </form>
   </Modal>;
@@ -120,9 +140,26 @@ function Inventory({ inventory, user, onEdit, onAdd, onSignIn, onExport }) {
 }
 
 export default function App() {
+  const [session, setSession] = useState({ loading: true, user: null, setupRequired: false, unavailable: false });
+  async function checkSession() {
+    setSession(current => ({ ...current, loading: true, unavailable: false }));
+    try { const result = await api('/auth'); setSession({ ...result, loading: false, unavailable: false }); }
+    catch { setSession({ user: null, loading: false, setupRequired: false, unavailable: true }); }
+  }
+  useEffect(() => {
+    checkSession();
+    const signOut = () => setSession(current => ({ ...current, user: null, loading: false }));
+    window.addEventListener('studio:unauthorized', signOut);
+    return () => window.removeEventListener('studio:unauthorized', signOut);
+  }, []);
+  if (session.loading || !session.user) return <LoginPage key={session.user?.id || 'login'} loading={session.loading} setupRequired={session.setupRequired} unavailable={session.unavailable} onRetry={checkSession} onSuccess={user => setSession({ user, loading: false, setupRequired: false, unavailable: false })} />;
+  return <WorkspaceApp key={session.user.id} account={session.user} onSignedOut={() => setSession(current => ({ ...current, user: null }))} />;
+}
+
+function WorkspaceApp({ account, onSignedOut }) {
   const [history, setHistory] = useState(() => {
     let building = defaultBuilding;
-    try { const saved = JSON.parse(localStorage.getItem('accusteel-draft')); if (saved) building = buildingSchema.parse(saved); } catch {}
+    try { const saved = JSON.parse(localStorage.getItem(`accusteel-draft:${account.id}:${account.email}`)); if (saved) building = buildingSchema.parse(saved); } catch {}
     return { past: [], present: building, future: [] };
   });
   const building = history.present;
@@ -136,10 +173,10 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [reference, setReference] = useState(null);
   const [modal, setModal] = useState(null);
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(account);
   const [setupRequired, setSetupRequired] = useState(false);
   const [aiConnected, setAiConnected] = useState(false);
-  const [inventory, setInventory] = useState(initialInventory);
+  const [inventory, setInventory] = useState([]);
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState(null);
   const [savedModel, setSavedModel] = useState(null);
@@ -157,7 +194,7 @@ export default function App() {
   const conversationRef = useRef(null);
   const currentModelRef = useRef(building);
   currentModelRef.current = building;
-  const canDesign = !user || designRoles.includes(user.role);
+  const canDesign = designRoles.includes(user.role);
   const metrics = buildingMetrics(building);
   const materials = billOfMaterials(building, inventory);
   const total = materials.reduce((sum, part) => sum + (part.total || 0), 0);
@@ -168,9 +205,9 @@ export default function App() {
   async function reloadProjects() { const data = await api('/projects'); setProjects(data); return data; }
   function workspaceChanged(settings) { setWorkspace(current => ({ ...current, ...settings })); if ('aiConnected' in settings) setAiConnected(settings.aiConnected); }
 
-  useEffect(() => { api('/auth').then(data => { setUser(data.user); setSetupRequired(data.setupRequired); setAiConnected(data.aiConnected); }).catch(() => notify('Workspace server unavailable. Local drafting is still available.')); }, []);
+  useEffect(() => { api('/auth').then(data => { if (!data.user) onSignedOut(); else { setUser(data.user); setAiConnected(data.aiConnected); } }).catch(() => onSignedOut()); }, []);
   useEffect(() => { api('/workspace').then(workspaceChanged).catch(() => {}); }, []);
-  useEffect(() => { try { localStorage.setItem('accusteel-draft', JSON.stringify(building)); } catch { notify('Local storage is unavailable. Export your project to keep a copy.'); } }, [building]);
+  useEffect(() => { try { localStorage.setItem(`accusteel-draft:${account.id}:${account.email}`, JSON.stringify(building)); } catch { notify('Local storage is unavailable. Export your project to keep a copy.'); } }, [building]);
   useEffect(() => {
     if (!user) { setInventory(initialInventory); setProjects([]); return; }
     api('/inventory').then(setInventory).catch(error => notify(error.message));
@@ -265,7 +302,7 @@ export default function App() {
       </div>
     </>}
 
-    {tab === 'inventory' && <Inventory inventory={inventory} user={user} onEdit={item => { setPart(item); setModal('part'); }} onAdd={() => { setPart(null); setModal('part'); }} onSignIn={() => setModal('auth')} onExport={() => { const rows = [['Part ID', 'Description', 'Category', 'Unit', 'On hand', 'Unit cost USD', 'Reorder point'], ...inventory.map(item => [item.id, item.name, item.category, item.unit, item.stock, item.price ?? '', item.reorder])]; download('inventory.csv', rows.map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\r\n'), 'text/csv'); }} />}
+    {tab === 'inventory' && <InventoryPage inventory={inventory} user={user} onEdit={item => { setPart(item); setModal('part'); }} onAdd={() => { setPart(null); setModal('part'); }} onImport={() => setModal('inventory-import')} onExport={() => download('inventory.csv', inventoryCsv(inventory), 'text/csv')} />}
     {tab === 'projects' && <ProjectCenter user={user} projects={projects} onReload={reloadProjects} onOpen={openProject} onSignIn={() => setModal('auth')} notify={notify} />}
     {tab === 'support' && <SupportCenter user={user} projects={projects} supportEmail={workspace.supportEmail} onSignIn={() => setModal('auth')} notify={notify} />}
     {tab === 'admin' && <AdminCenter user={user} notify={notify} onWorkspaceChange={workspaceChanged} onSecurity={() => setModal(user ? 'account' : 'auth')} onSupport={() => setTab('support')} onSignIn={() => setModal('auth')} />}
@@ -273,7 +310,8 @@ export default function App() {
     <footer className="app-status"><div><span className="status-indicator" /> DRAFT STUDIO <span className="status-version">v0.1</span><span className="status-rule" /><span>Preliminary design workspace</span></div><div><span>Audubon, Iowa</span><span className="status-rule" /><span>Imperial (ft / in)</span><span className="status-rule" /><span className="status-scale">{user ? `${user.role} access` : 'Local draft'}</span></div></footer>
     {toast && <div className="toast" role="status"><Check size={16} /><span>{toast}</span><IconButton icon={X} label="Dismiss notification" onClick={() => setToast(null)} /></div>}
     {modal === 'auth' && <AuthDialog setup={setupRequired} onClose={() => setModal(null)} onSuccess={account => { setUser(account); setSetupRequired(false); setModal(null); notify('Welcome to your workspace.'); }} />}
-    {modal === 'account' && user && <AccountDialog user={user} onClose={() => setModal(null)} onUser={setUser} notify={notify} onLogout={async () => { try { await api('/auth/logout', {}); setUser(null); setProjectId(null); setSavedModel(null); setModal(null); notify('Signed out. Your local draft is retained on this device.'); } catch (error) { notify(error.message); } }} />}
+    {modal === 'account' && user && <AccountDialog user={user} onClose={() => setModal(null)} onUser={setUser} notify={notify} onLogout={async () => { try { await api('/auth/logout', {}); onSignedOut(); } catch (error) { notify(error.message); } }} />}
+    {modal === 'inventory-import' && <InventoryImport inventory={inventory} onClose={() => setModal(null)} onImported={async result => { setInventory(await api('/inventory')); setModal(null); notify(`Inventory imported: ${result.counts.add} added, ${result.counts.update} updated, ${result.counts.skip} skipped.`); }} />}
     {modal === 'import' && <ImportDialog onClose={() => setModal(null)} onImport={imported} />}
     {modal === 'export' && <ExportDialog building={building} materials={materials} onClose={() => setModal(null)} notify={notify} />}
     {modal === 'site' && <Modal wide title="Site & openings" subtitle="Manual site, wall, floor, and opening parameters · engineering review required." onClose={() => setModal(null)}><SiteControls building={building} canEdit={canDesign} onSave={changes => { update(changes); setModal(null); notify('Construction geometry and material takeoff updated. Engineering release remains pending.'); }} /></Modal>}
