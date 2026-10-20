@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as OTPAuth from 'otpauth';
 import { createApp } from '../server/index.js';
+import { provisionInitialAdmin } from '../server/accounts.js';
 import { defaultBuilding } from '../shared/model.js';
 
 test('workspace authentication, permissions, persistence, and TOTP work end to end', async () => {
@@ -17,9 +18,10 @@ test('workspace authentication, permissions, persistence, and TOTP work end to e
   try {
     assert.equal((await request('/inventory')).status, 401);
     assert.equal((await request('/auth')).data.setupRequired, true);
-    const register = await request('/auth/register', { name: 'Test Admin', email: 'admin@example.com', password: 'a-long-test-password' });
-    assert.equal(register.status, 201);
-    cookie = register.cookie;
+    await provisionInitialAdmin(db, { name: 'Test Admin', email: 'admin@example.com', password: 'a-long-test-password' });
+    const login = await request('/auth/login', { email: 'admin@example.com', password: 'a-long-test-password' });
+    assert.equal(login.status, 200);
+    cookie = login.cookie;
     assert.equal((await request('/auth/register', { name: 'Another Admin', email: 'other@example.com', password: 'a-long-test-password' })).status, 403);
     assert.equal((await request('/projects', { building: defaultBuilding })).status, 200);
     assert.equal((await request('/projects')).data.length, 1);

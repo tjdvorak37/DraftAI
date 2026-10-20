@@ -12,6 +12,9 @@ import { z } from 'zod';
 import { buildingSchema, initialInventory, parseDesignCommand } from '../shared/model.js';
 import { roles, designRoles, costRoles } from '../shared/access.js';
 import { registerWorkspace } from './workspace.js';
+import { credentialsSchema, profileSchema } from './accounts.js';
+import { inventoryItemSchema } from '../shared/inventory.js';
+import { registerInventoryImport } from './inventory.js';
 
 export function createApp({ databasePath = process.env.DATABASE_PATH || 'data/studio.sqlite', encryptionKey } = {}) {
   if (databasePath !== ':memory:') mkdirSync(dirname(databasePath), { recursive: true });
@@ -42,7 +45,7 @@ export function createApp({ databasePath = process.env.DATABASE_PATH || 'data/st
   for (const item of initialInventory) insert.run(item.id, item.name, item.category, item.unit, item.stock, item.price, item.reorder);
   const app = express();
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '2mb' }));
+  app.use(express.json({ limit: '10mb' }));
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
@@ -57,7 +60,7 @@ export function createApp({ databasePath = process.env.DATABASE_PATH || 'data/st
     next();
   });
   const audit = (req, action, detail) => db.prepare('INSERT INTO audit (actor,action,detail) VALUES (?,?,?)').run(req.user?.id || null, action, JSON.stringify(detail));
-  const publicUser = user => ({ id: user.id, name: user.name, email: user.email, role: user.role, twoFactor: Boolean(user.totp), disabled: Boolean(user.disabled) });
+  const publicUser = user => ({ id: user.id, name: user.name, email: user.email, role: user.role, twoFactor: Boolean(user.totp), disabled: Boolean(user.disabled), address: user.address || '', phone: user.phone || '', department: user.department || '', jobTitle: user.job_title || '' });
   const allow = (...roles) => (req, res, next) => !req.user ? res.status(401).json({ error: 'Sign in to access your workspace.' }) : roles.length && !roles.includes(req.user.role) ? res.status(403).json({ error: 'Your role does not permit this action.' }) : next();
   const authLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Too many attempts. Please try again in 15 minutes.' } });
   const setSession = (res, user) => {
@@ -66,21 +69,12 @@ export function createApp({ databasePath = process.env.DATABASE_PATH || 'data/st
     db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(createHash('sha256').update(token).digest('hex'), user.id, Date.now() + 8 * 60 * 60 * 1000);
     res.cookie('studio_session', token, { httpOnly: true, sameSite: 'strict', secure: process.env.SESSION_SECURE === 'true', maxAge: 8 * 60 * 60 * 1000, path: '/' });
   };
-  const credentials = z.object({ name: z.string().trim().min(2).max(80), email: z.email().max(254).transform(value => value.toLowerCase()), password: z.string().min(12).max(72) });
+  const credentials = credentialsSchema;
   const totpFor = (secret, user) => new OTPAuth.TOTP({ issuer: 'Accu-Steel Draft Studio', label: user.email, algorithm: 'SHA1', digits: 6, period: 30, secret: OTPAuth.Secret.fromBase32(secret) });
   const { aiConfig, workspaceSettings } = registerWorkspace({ app, db, allow, audit, publicUser, seal, unseal });
-  app.get('/api/auth', (req, res) => res.json({ user: req.user ? publicUser(req.user) : null, setupRequired: !db.prepare('SELECT id FROM users LIMIT 1').get(), aiConnected: workspaceSettings().aiConnected }));
-  app.post('/api/auth/register', authLimit, async (req, res) => {
-    const parsed = credentials.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'Enter a name, valid email, and a password of 12-72 characters.' });
-    const data = parsed.data;
-    const password = await bcrypt.hash(data.password, 12);
-    if (db.prepare('SELECT id FROM users LIMIT 1').get()) return res.status(403).json({ error: 'Workspace already initialized. Ask an administrator for an account.' });
-    const result = db.prepare('INSERT INTO users (name,email,password,role) VALUES (?,?,?,?)').run(data.name, data.email, password, 'admin');
-    const user = db.prepare('SELECT * FROM users WHERE id=?').get(result.lastInsertRowid);
-    setSession(res, user);
-    res.status(201).json({ user: publicUser(user) });
-  });
+  registerInventoryImport({ app, db, allow, audit });
+  app.get('/api/auth', (req, res) => res.json({ user: req.user ? publicUser(req.user) : null, setupRequired: !db.prepare('SELECT id FROM users LIMIT 1').get(), aiConnected: Boolean(req.user && workspaceSettings().aiConnected) }));
+  app.post('/api/auth/register', authLimit, (req, res) => res.status(403).json({ error: 'Public registration is disabled. Management must provision your account.' }));
   app.post('/api/auth/login', authLimit, async (req, res) => {
     const user = typeof req.body.email === 'string' ? db.prepare('SELECT * FROM users WHERE email=?').get(req.body.email.toLowerCase()) : null;
     const valid = await bcrypt.compare(typeof req.body.password === 'string' ? req.body.password.slice(0, 73) : '', user?.password || '$2b$12$G8pqBhOT.dP1HRK1RdyvjeOTsIKC1Y7RVnQNGL1b9eXRDqjGaR4aG');
@@ -123,21 +117,34 @@ export function createApp({ databasePath = process.env.DATABASE_PATH || 'data/st
     const data = parsed.data;
     const password = await bcrypt.hash(data.password, 12);
     try {
-      const result = db.prepare('INSERT INTO users (name,email,password,role) VALUES (?,?,?,?)').run(data.name, data.email, password, data.role);
+      const result = db.prepare('INSERT INTO users (name,email,password,role,address,phone,department,job_title) VALUES (?,?,?,?,?,?,?,?)').run(data.name, data.email, password, data.role, data.address, data.phone, data.department, data.jobTitle);
       audit(req, 'user.create', { id: Number(result.lastInsertRowid), role: data.role });
       res.status(201).json({ ok: true });
     } catch { res.status(409).json({ error: 'An account with that email already exists.' }); }
+  });
+  app.post('/api/users/:id/profile', allow('admin'), (req, res) => {
+    const parsed = profileSchema.safeParse(req.body);
+    const id = Number(req.params.id);
+    if (!parsed.success || !Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: 'Enter a name, valid email, and valid profile fields.' });
+    const target = db.prepare('SELECT * FROM users WHERE id=?').get(id);
+    if (!target) return res.status(404).json({ error: 'Account not found.' });
+    const data = parsed.data;
+    if (db.prepare('SELECT id FROM users WHERE email=? AND id<>?').get(data.email, id)) return res.status(409).json({ error: 'Another account already uses that email.' });
+    db.prepare('UPDATE users SET name=?,email=?,address=?,phone=?,department=?,job_title=? WHERE id=?').run(data.name, data.email, data.address, data.phone, data.department, data.jobTitle, id);
+    if (target.email !== data.email) db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+    audit(req, 'user.profile.update', { id, fields: ['name', 'email', 'address', 'phone', 'department', 'jobTitle'], sessionsRevoked: target.email !== data.email });
+    res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id)), requiresSignIn: target.email !== data.email && id === req.user.id });
   });
   app.get('/api/inventory', allow(), (req, res) => {
     const items = db.prepare('SELECT * FROM inventory ORDER BY id').all();
     res.json(items.map(item => costRoles.includes(req.user.role) ? item : { ...item, price: null }));
   });
-  const itemSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9-]{2,24}$/), name: z.string().trim().min(1).max(120), category: z.enum(['Structural', 'Covering', 'Hardware', 'Custom']), unit: z.enum(['ea', 'kit', 'sq ft', 'ft', 'cu yd']), stock: z.number().min(0).max(1e9), price: z.number().min(0).max(1e8).nullable(), reorder: z.number().min(0).max(1e9) });
+  const itemSchema = inventoryItemSchema;
   app.post('/api/inventory', allow('admin', 'estimator'), (req, res) => {
     const parsed = itemSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Check the part ID, unit, stock, and cost. Leave unknown costs blank.' });
     const item = parsed.data;
-    db.prepare('INSERT INTO inventory VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,category=excluded.category,unit=excluded.unit,stock=excluded.stock,price=excluded.price,reorder=excluded.reorder').run(item.id, item.name, item.category, item.unit, item.stock, item.price, item.reorder);
+    db.prepare('INSERT INTO inventory (id,name,category,unit,stock,price,reorder,location,supplier) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,category=excluded.category,unit=excluded.unit,stock=excluded.stock,price=excluded.price,reorder=excluded.reorder,location=excluded.location,supplier=excluded.supplier').run(item.id, item.name, item.category, item.unit, item.stock, item.price, item.reorder, item.location, item.supplier);
     audit(req, 'inventory.save', item);
     res.json({ ok: true });
   });

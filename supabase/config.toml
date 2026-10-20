@@ -1,0 +1,10 @@
+project_id = "draftai"
+
+[auth]
+enable_signup = false
+
+[auth.email]
+enable_signup = true
+
+[functions.workspace-api]
+verify_jwt = false

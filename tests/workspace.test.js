@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../server/index.js';
+import { provisionInitialAdmin } from '../server/accounts.js';
 import { defaultBuilding } from '../shared/model.js';
 
 test('admin configuration, management projects, and private staff tickets enforce access', async () => {
@@ -13,7 +14,8 @@ test('admin configuration, management projects, and private staff tickets enforc
     return { status: response.status, data: await response.json(), cookie: response.headers.get('set-cookie')?.split(';')[0] };
   }
   try {
-    const admin = (await request('/auth/register', { name: 'Admin User', email: 'admin@test.com', password: 'long-admin-password' })).cookie;
+    await provisionInitialAdmin(db, { name: 'Admin User', email: 'admin@test.com', password: 'long-admin-password' });
+    const admin = (await request('/auth/login', { email: 'admin@test.com', password: 'long-admin-password' })).cookie;
     for (const role of ['manager', 'technician', 'viewer']) assert.equal((await request('/users', { name: `${role} user`, email: `${role}@test.com`, password: 'long-staff-password', role }, admin)).status, 201);
     const manager = (await request('/auth/login', { email: 'manager@test.com', password: 'long-staff-password' })).cookie;
     const technician = (await request('/auth/login', { email: 'technician@test.com', password: 'long-staff-password' })).cookie;
@@ -23,7 +25,7 @@ test('admin configuration, management projects, and private staff tickets enforc
     assert.equal(ambiguous.status, 422);
     assert.equal(ambiguous.data.needsClarification, true);
     assert.equal((await request('/admin/settings', { name: 'Accu-Steel Operations', supportEmail: 'help@test.com' }, admin)).status, 200);
-    assert.equal((await request('/workspace')).data.name, 'Accu-Steel Operations');
+    assert.equal((await request('/workspace', undefined, admin)).data.name, 'Accu-Steel Operations');
     assert.equal((await request('/admin/integrations/openai', { model: 'gpt-4o-mini', enabled: false, apiKey: 'test-only-not-a-provider-key' }, admin)).status, 200);
     const settings = await request('/admin', undefined, admin);
     assert.equal(settings.data.integrations.openai.configured, true);

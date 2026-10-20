@@ -38,6 +38,10 @@ test('open end walls reduce fabric and remove the door line item', () => {
   assert.ok(!billOfMaterials(open).some(part => part.id === 'DR-007'));
 });
 
+test('an empty live inventory cannot silently substitute sample costs', () => {
+  assert.ok(billOfMaterials(defaultBuilding, []).every(part => part.price === null && part.total === null));
+});
+
 test('door commands support words, abbreviations, feet-and-inches, and context without guessing', () => {
   for (const request of ['I need the garage door to be 20 feet by 14 feet', "Set the garage door to 20' x 14'", 'door 20ft x 14ft']) {
     const result = parseDesignCommand(request, defaultBuilding);

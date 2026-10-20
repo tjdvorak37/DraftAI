@@ -1,6 +1,8 @@
 # Accu-Steel Draft Studio
 
-A working full-stack prototype for configuring fabric-covered steel buildings, reviewing preliminary material takeoffs, and managing inventory and unit costs. React + Three.js + Express + SQLite. Requires Node.js 24 or later.
+A working full-stack application for configuring fabric-covered steel buildings, reviewing dimensional material takeoffs, and managing inventory and costs. React + Three.js, with Supabase Auth/Postgres/Edge Functions for hosted deployments and Express/SQLite for local development. Requires Node.js 24 or later. Structural engineering and fabrication-release limitations still apply.
+
+**Hosted setup:** follow [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md) for setup and acceptance. DraftAI's Supabase migration is applied, the authenticated function is deployed, public signup is disabled, and hosted smoke checks pass with temporary records removed afterward. Amplify deployment, authorization of its exact frontend URL, and private provisioning of the permanent initial administrator remain to be completed. Optional AI credentials/encryption setup are separate from core login and inventory operation.
 
 **New functional slice:** terrain-aware concrete wall layouts now change column-leg lengths, side-girt lengths, covering areas, and geometric cut/fill quantities. Open **Site & openings** to configure the layout and **Construction schedule** to inspect/export the calculated lengths and wall sections. Follow [the construction test guide](docs/CONSTRUCTION_TESTING.md) for an exact repeatable hillside case. These dimensional calculations do not constitute structural approval or a complete fabrication list.
 
@@ -8,12 +10,13 @@ A working full-stack prototype for configuring fabric-covered steel buildings, r
 
 ```sh
 npm install
+npm run provision-admin
 npm run dev
 ```
 
 Open http://localhost:5173. The API runs on port 3001. Vite automatically chooses another frontend port when 5173 is occupied.
 
-The first screen is a usable local building draft, not a landing page. Dimensions persist in this browser's local storage. Local draft data remains on the device after sign-out; avoid shared browsers for confidential designs. Export JSON to keep an independent editable copy. SQLite workspace data is stored in the ignored `data/` directory.
+The first screen is **Sign in**, with no public signup or guest workspace. Management provisions all accounts. The local initial-admin command uses masked terminal prompts and refuses to run once accounts exist. For Supabase, the first admin is created privately using the dashboard and guarded profile SQL in the setup guide. Drafts are stored under the authenticated user's identity in this browser; they are not shown before login. They remain on the device after sign-out, so avoid shared browsers for confidential designs. SQLite development data stays in the ignored `data/` directory. Production defaults to Supabase and locks access when its public configuration is missing.
 
 ## Included
 
@@ -23,17 +26,18 @@ The first screen is a usable local building draft, not a landing page. Dimension
 - Orbit, zoom, pan, plan/elevation cameras, cutaway, wireframe, dimensions, grid, component inspection, and undo/redo.
 - Preliminary catalog-driven material quantities, extended costs, unpriced custom door line, and CSV export. Unknown costs remain `null`, not zero. Unit costs retain cents.
 - Workspace inventory with search, categories, stock/reorder thresholds, editable unit costs, custom parts, stock valuation, and CSV export. Custom catalog parts are inventory entries, not automatically included in a building or modeled in 3D.
+- CSV/XLSX bulk inventory import with worksheet selection, automatic/custom column mapping, add/update modes, custom categories/units, counts, costs, reorder points, locations, and suppliers. Preview performs no inventory writes; apply is explicit, transactional, audited, conflict-checked, and non-replayable. Duplicate/invalid rows block import. Up to 5,000 rows per sheet, 100 columns, and 8 MB source file. Imported parts do not automatically become modeled building assemblies.
 - Editable Draft Studio JSON import/export, plus ASCII DXF reference import and 2D footprint/bay-layout DXF export.
 - Project Center with direct project creation, building editing, client/site metadata, ownership, target dates, notes, workflow status, search/filtering, and revision-checked metadata updates, backed by SQLite.
 - Dedicated Admin Center for workspace identity, support email, account creation, role changes, account disabling, encrypted OpenAI connection settings/testing, and recent audit history.
 - Support Center with private requester tickets, priorities/categories, linked projects, technician assignment, workflow status, and threaded replies. Administrators and technicians see the full queue; other users see only their own tickets. Attachments, email notifications, SLAs, and external helpdesk sync are not yet implemented.
-- First-administrator registration, administrator-created team accounts, bcrypt passwords, expiring hashed session tokens in HTTP-only same-site cookies, authentication rate limits, same-origin mutation checks, server-enforced roles, and audit records for inventory/project/team changes.
+- Private administrator provisioning and management-created accounts with name, address, phone, department, job title, email, and access level. Personal contact details are visible only to administrators and the account holder. Local mode uses bcrypt/HTTP-only sessions; hosted mode uses Supabase Auth and row-level policies, including MFA assurance checks. Public registration is disabled in the app and must also be disabled in hosted Supabase settings.
 - Optional authenticator-app TOTP enrollment with QR code, AES-256-GCM encrypted secrets, verification, and used-code rejection. Each user enables two-factor authentication in workspace settings.
 - Typed design requests with a review/apply step. Local commands work without credentials or a network AI provider. Optional OpenAI integration runs only on the server and validates returned models before applying them.
 
 ## Accounts And Permissions
 
-Click **Sign in**. On a new database, create the first administrator account with a password of at least 12 characters. Initialize this account on a private network before exposing the service. Open **Admin → People & access** to create accounts and update roles. Use the avatar menu for personal two-factor settings. The Admin navigation is visible to administrators (and to unauthenticated users so account setup is discoverable); its data and write operations are protected server-side.
+Provision the initial administrator privately as described above. Open **Admin → People & access** to create accounts, edit contact/employment profiles, assign roles, and disable access. Use the avatar menu for personal two-factor settings. The workspace, its navigation, projects, and inventory are not available before sign-in. Only administrators can see and use the Admin Center.
 
 | Role | Read projects | Edit/save designs | View costs | Manage inventory/costs | Create accounts |
 | --- | --- | --- | --- | --- | --- |
@@ -44,7 +48,7 @@ Click **Sign in**. On a new database, create the first administrator account wit
 | Technician | Yes | No | No | No | No |
 | Viewer | Yes | No | No | No | No |
 
-Viewer and technician cost fields are removed by the API, not just hidden in the UI. Managers, engineers, and administrators can manage project metadata. Only technicians and administrators can triage all support tickets. Role changes and account disabling revoke that person's existing sessions; administrators cannot disable or demote their own account. The unauthenticated experience uses a separate illustrative catalog; it cannot read or write live inventory. Accounts currently share one workspace. Object-level project permissions and multi-tenancy are not implemented.
+Viewer and technician costs are protected server-side (separate RLS-protected cost records in Supabase), not just hidden in the UI. Managers, engineers, and administrators can manage project metadata. Only technicians and administrators can triage all support tickets. Local access changes revoke sessions; Supabase rights/disabled status are checked on each request and by database policies, rather than trusting stale client role claims. Administrators cannot disable or demote their own account. Accounts currently share one workspace. Object-level project permissions and multi-tenancy are not implemented.
 
 Two-factor authentication is optional, not organization-enforced. Password changes, account recovery, TOTP recovery codes, user removal, and self-service resets are not yet implemented. Back up your authenticator. Administrators should distribute initial team passwords through a secure channel.
 
@@ -86,7 +90,7 @@ npm run dev
 
 Sign in as an engineer, manager, or administrator. The assistant shows **AI CONNECTED** when enabled credentials are configured, not a guarantee that the provider is currently healthy. The server first derives a supported deterministic change or requests clarification, then calls OpenAI with the current and validated candidate building plus your prompt. In this version the provider explains the validated operation; its returned model must exactly match the validated candidate or the request fails. Broader autonomous CAD/tool operations are not implemented. This integration incurs provider usage charges and sends design parameters to the provider; obtain company approval before using proprietary designs. Live provider calls are not exercised by automated tests without credentials. Provider failure or schema validation failure cannot silently change the building. Do not put keys in Vite client environment variables or commit them.
 
-SMS management and EchoAIPro are shown as **planned, unimplemented connectors**, not working connections. Their repositories/workflows, API documentation, authentication model, approved event/data mappings, and sandbox access are required to implement actual synchronization. The Support Center is currently local to this workspace, not integrated with EchoAIPro.
+No external business-system connectors are planned or displayed. Support tickets are managed within this application. OpenAI is an optional, separately configured design integration.
 
 ## Drawing Interoperability
 
@@ -117,12 +121,16 @@ npx playwright install --with-deps chromium
 npm run test:e2e
 ```
 
-Seventeen unit/API tests cover the model, dimensional construction takeoffs, geometric integration and intersections, member continuity, construction persistence/cubic-yard pricing, request parsing, imports, authentication/permissions, encrypted settings/TOTP, tickets, and metadata conflicts. Four browser workflows use a separate in-memory database and ports 3002/5174; they do not initialize or modify your development workspace. They exercise drafting, terrain-adapted construction geometry and exported lengths, desktop/mobile canvases and layout, persistence, pricing, administration, support, and authenticator sign-in. Chromium software rendering can make the full browser suite take several minutes in containers.
+Twenty-four automated tests cover the model, dimensional construction takeoffs, imports, authentication, private management-controlled profiles, inventory transactions, Supabase policies/MFA/authorization, and existing project/ticket workflows. Six browser workflows use a separate in-memory database and ports 3002/5174; they do not initialize or modify your development workspace. They exercise login-first access, drafting, terrain-adapted construction, CSV/XLSX import and worksheet mapping, private profile management, projects, tickets, and authenticator sign-in on desktop/mobile. All pass. The Deno function check and dependency audit also pass. Hosted smoke tests independently verify deployed Auth/function/data access using temporary accounts and records, removed afterward. Chromium software rendering can make the full browser suite take several minutes in containers.
 
 ## Deployment
 
+**Amplify + Supabase is the hosted deployment path:** use the setup guide above. Configure `VITE_BACKEND=supabase`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_PUBLISHABLE_KEY` in Amplify, apply the migration and deploy `workspace-api` in Supabase, and restrict `ALLOWED_ORIGINS` to the actual frontend URLs. Service-role keys, database passwords, encryption keys, and OpenAI credentials must never appear in frontend variables. The included Amplify build publishes `dist` without an Express server.
+
+The commands below describe the alternative single-server SQLite/local backend. Its frontend must be built explicitly with `VITE_BACKEND=local`; it is not the Amplify deployment:
+
 ```sh
-npm run build
+VITE_BACKEND=local npm run build
 SESSION_SECURE=true npm start
 ```
 

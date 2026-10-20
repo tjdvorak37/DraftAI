@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import UserProfileForm, { UserProfileFields } from './UserProfileForm.jsx';
 import {
   Activity,
   ArrowRight,
@@ -108,7 +109,7 @@ function RoleSelect({ ...props }) {
   );
 }
 
-function TeamMember({ member, selfId, onSaved, notify }) {
+function TeamMember({ member, selfId, onSaved, notify, onEdit }) {
   const [role, setRole] = useState(member.role);
   const [disabled, setDisabled] = useState(member.disabled);
   const [busy, setBusy] = useState(false);
@@ -161,6 +162,7 @@ function TeamMember({ member, selfId, onSaved, notify }) {
         </label>
       </td>
       <td>
+        <button className="button compact" onClick={() => onEdit(member)} aria-label={`Edit profile for ${member.name}`}>Profile</button>{" "}
         <button
           className="button compact"
           disabled={!dirty || busy || self}
@@ -187,6 +189,7 @@ export function AdminCenter({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [invite, setInvite] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
   const [integrationKey, setIntegrationKey] = useState("");
   const [connectionResult, setConnectionResult] = useState("");
   async function load() {
@@ -480,6 +483,7 @@ export function AdminCenter({
                             selfId={user.id}
                             onSaved={load}
                             notify={notify}
+                            onEdit={setEditingUser}
                           />
                         ))}
                       </tbody>
@@ -618,33 +622,6 @@ export function AdminCenter({
                       )}
                     </form>
                   </section>
-                  <section className="settings-section">
-                    <h2>Business system connections</h2>
-                    <div className="connector-row">
-                      <Link2 size={22} />
-                      <div>
-                        <strong>SMS management</strong>
-                        <span>Connector not implemented</span>
-                      </div>
-                      <span className="status-pill">Planned</span>
-                    </div>
-                    <div className="connector-row">
-                      <LifeBuoy size={22} />
-                      <div>
-                        <strong>EchoAIPro</strong>
-                        <span>Connector not implemented</span>
-                      </div>
-                      <span className="status-pill">Planned</span>
-                    </div>
-                    <p className="muted">
-                      These systems are not connected. Their API documentation,
-                      authentication method, and approved data mappings are
-                      required before a connector can be built.
-                    </p>
-                    <button className="button" onClick={onSupport}>
-                      <Ticket size={14} /> Request an integration
-                    </button>
-                  </section>
                 </div>
               )}
               {section === "activity" && (
@@ -721,6 +698,7 @@ export function AdminCenter({
                   Workspace role
                   <RoleSelect name="role" defaultValue="engineer" />
                 </label>
+                <UserProfileFields />
                 {error && (
                   <p className="form-error" role="alert">
                     {error}
@@ -732,6 +710,7 @@ export function AdminCenter({
               </form>
             </Modal>
           )}
+          {editingUser && <UserProfileForm user={editingUser} onClose={() => setEditingUser(null)} onSaved={async result => { setEditingUser(null); if (result.requiresSignIn) { window.dispatchEvent(new Event('studio:unauthorized')); return; } await load(); notify('User profile updated.'); }} />}
         </>
       )}
     </main>
@@ -749,7 +728,7 @@ function ProjectDetailsDialog({ project, owners, onClose, onSaved }) {
     try {
       await api(`/projects/${project.id}/details`, {
         ...values,
-        owner: values.owner ? Number(values.owner) : null,
+        owner: values.owner ? /^\d+$/.test(values.owner) ? Number(values.owner) : values.owner : null,
         revision: project.revision,
       });
       await onSaved();
@@ -1313,7 +1292,7 @@ function TicketDetail({ id, summary, user, agents, onClose, onChanged }) {
     try {
       await api(`/tickets/${id}/triage`, {
         ...values,
-        assignee: values.assignee ? Number(values.assignee) : null,
+        assignee: values.assignee ? /^\d+$/.test(values.assignee) ? Number(values.assignee) : values.assignee : null,
       });
       await load();
       await onChanged();
