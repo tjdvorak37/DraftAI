@@ -8,6 +8,7 @@ export const profileSchema = z.object({
   phone: z.string().trim().max(40).default(''),
   department: z.string().trim().max(80).default(''),
   jobTitle: z.string().trim().max(80).default(''),
+  locationId: z.string().trim().toUpperCase().regex(/^[A-Z0-9][A-Z0-9_-]{0,23}$/).default('MAIN'),
 });
 export const credentialsSchema = profileSchema.extend({ password: z.string().min(12).max(72).refine(value => Buffer.byteLength(value, 'utf8') <= 72, 'Password must not exceed 72 UTF-8 bytes.') });
 

@@ -2,6 +2,7 @@ project_id = "draftai"
 
 [auth]
 enable_signup = false
+site_url = "https://main.d1dq7mzpn9g8pz.amplifyapp.com"
 
 [auth.email]
 enable_signup = true

@@ -6,6 +6,7 @@ export const inventoryItemSchema = z.object({
   unit: z.string().trim().min(1).max(24), stock: z.number().min(0).max(1e9),
   price: z.number().min(0).max(1e8).nullable(), reorder: z.number().min(0).max(1e9),
   location: z.string().trim().max(160).default(''), supplier: z.string().trim().max(160).default(''),
+  location_id: z.string().trim().toUpperCase().regex(/^[A-Z0-9][A-Z0-9_-]{0,23}$/).default('MAIN'),
 });
 export const inventoryFields = [
   { id: 'id', name: 'Part ID / SKU', aliases: ['partid', 'sku', 'partnumber', 'itemnumber', 'itemid', 'id'] },
@@ -31,7 +32,7 @@ function numeric(value, field) {
   return Number(text.replaceAll(',', ''));
 }
 
-export function previewInventoryImport({ headers, rows, mapping, mode }, existing) {
+export function previewInventoryImport({ headers, rows, mapping, mode, locationId = 'MAIN' }, existing, catalog = existing) {
   const current = new Map(existing.map(item => [item.id, inventoryItemSchema.parse(item)]));
   const occurrences = new Map();
   const idIndex = mapping.id;
@@ -46,7 +47,8 @@ export function previewInventoryImport({ headers, rows, mapping, mode }, existin
     try {
       if (!id) throw new Error('Part ID / SKU is missing.');
       if (occurrences.get(id) > 1) throw new Error('Duplicate Part ID / SKU in this file. Resolve duplicates before importing.');
-      const item = before ? { ...before } : { id, name: '', category: 'Uncategorized', unit: 'ea', stock: null, price: null, reorder: 0, location: '', supplier: '' };
+      const reference = catalog.find(item => item.id === id);
+      const item = before ? { ...before } : { id, name: reference?.name || '', category: reference?.category || 'Uncategorized', unit: reference?.unit || 'ea', stock: null, price: reference?.price ?? null, reorder: 0, location: '', supplier: reference?.supplier || '', location_id: locationId };
       for (const field of inventoryFields) {
         const column = mapping[field.id];
         if (!Number.isInteger(column) || column < 0) continue;

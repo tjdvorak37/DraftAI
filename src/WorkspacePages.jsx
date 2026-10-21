@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import UserProfileForm, { UserProfileFields } from './UserProfileForm.jsx';
+import { LocationsPanel } from './OperationsPages.jsx';
 import {
   Activity,
   ArrowRight,
@@ -182,6 +183,7 @@ export function AdminCenter({
   onSecurity,
   onSupport,
   onSignIn,
+  onLocationsChanged,
 }) {
   const [section, setSection] = useState("overview");
   const [data, setData] = useState(null);
@@ -297,6 +299,7 @@ export function AdminCenter({
             {[
               { id: "overview", icon: Settings2, name: "Workspace" },
               { id: "people", icon: Users, name: "People & access" },
+              { id: "locations", icon: Box, name: "Locations" },
               { id: "integrations", icon: Plug, name: "Integrations" },
               { id: "activity", icon: Activity, name: "Activity log" },
             ].map(({ id, icon: Icon, name }) => (
@@ -326,6 +329,7 @@ export function AdminCenter({
             </div>
           ) : (
             <>
+              {section === 'locations' && <LocationsPanel notify={notify} onChanged={onLocationsChanged} />}
               {section === "overview" && (
                 <>
                   <div className="inventory-metrics admin-metrics">

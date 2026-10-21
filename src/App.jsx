@@ -12,22 +12,27 @@ import ConstructionReport from './ConstructionReport.jsx';
 import LoginPage from './LoginPage.jsx';
 import InventoryImport from './InventoryImport.jsx';
 import { inventoryCsv } from './inventoryFiles.js';
+import { CustomersPage, ShippingPage } from './OperationsPages.jsx';
+import { logisticsRoles } from '../shared/operations.js';
 
-function InventoryPage({ inventory, user, onEdit, onAdd, onExport, onImport }) {
+function InventoryPage({ inventory, user, onEdit, onAdd, onExport, onImport,locations,locationId,onLocationChange }) {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All parts');
-  const canEdit = ['admin', 'estimator'].includes(user.role);
+  const canEdit = ['admin', 'estimator'].includes(user.role)&&locationId!=='all';
   const visible = inventory.filter(item => `${item.name} ${item.id} ${item.location || ''} ${item.supplier || ''}`.toLowerCase().includes(search.toLowerCase()) && (category === 'All parts' || item.category === category));
   const value = inventory.reduce((sum, item) => sum + item.stock * (item.price || 0), 0);
   return <main className="management-page">
     <div className="page-eyebrow">WORKSPACE / MATERIALS</div>
+    <div className="inventory-location-bar"><MapLocationIcon/><label>Inventory location<select aria-label="Inventory location" value={locationId} onChange={event=>onLocationChange(event.target.value)}>{locations.filter(location=>location.active).map(location=><option key={location.id} value={location.id}>{location.name}{location.id===user.locationId?' · my work location':''}</option>)}<option value="all">All locations · combined totals</option></select></label><span>{locationId==='all'?'Choose one site to edit counts or import stock.':'On hand includes held materials; available excludes delivery holds.'}</span></div>
     <div className="page-title"><div><h1>Inventory</h1><p>Every component. Every cost. In one place.</p></div><div className="button-group"><button className="button" onClick={onExport}><Download size={16} /> Export sheet</button><button className="button" onClick={onImport} disabled={!canEdit}><FileUp size={16} /> Import inventory</button><button className="button primary" onClick={onAdd} disabled={!canEdit}><Plus size={17} /> Add part</button></div></div>
     <div className="inventory-metrics"><div><span>Catalog parts</span><strong>{inventory.length}<small>active items</small></strong></div><div><span>Inventory value</span><strong>{!costRoles.includes(user.role) ? 'Restricted' : money(value)}<small>priced stock only</small></strong></div><div><span>Below reorder point</span><strong className="amber-text">{inventory.filter(item => item.stock < item.reorder).length}<small>parts need attention</small></strong></div><div><span>Awaiting pricing</span><strong>{inventory.filter(item => item.price == null).length}<small>custom or unpriced parts</small></strong></div></div>
     <div className="table-toolbar"><div className="search-field"><Search size={16} /><input aria-label="Search inventory" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search part name, ID, or location…" /></div><select aria-label="Filter inventory category" value={category} onChange={event => setCategory(event.target.value)}>{['All parts', ...[...new Set(inventory.map(item => item.category))].sort()].map(item => <option key={item}>{item}</option>)}</select><span>{visible.length} parts</span></div>
-    <div className="table-scroll"><table className="inventory-table"><thead><tr><th>PART / DESCRIPTION</th><th>CATEGORY</th><th>ON HAND</th><th>UNIT COST</th><th>STOCK VALUE</th><th>STATUS</th><th></th></tr></thead><tbody>{visible.map(item => <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id} · {item.unit}{item.location ? ` · ${item.location}` : ''}</small>{item.supplier && <small>{item.supplier}</small>}</td><td><span className="category-label">{item.category}</span></td><td>{number(item.stock)} <span className="muted">{item.unit}</span></td><td>{!costRoles.includes(user.role) ? 'Restricted' : money(item.price)}</td><td>{item.price == null ? '—' : money(item.stock * item.price)}</td><td><span className={`stock-label ${item.stock < item.reorder ? 'low' : item.price == null ? 'unpriced' : ''}`}><i />{item.stock < item.reorder ? 'Low stock' : item.price == null ? 'Needs pricing' : 'In stock'}</span></td><td><IconButton icon={Settings2} label={`Edit ${item.name}`} disabled={!canEdit} onClick={() => onEdit(item)} /></td></tr>)}</tbody></table>{!visible.length && <div className="empty-state"><Search size={30} /><h3>No matching parts</h3><p>Try another part name or category.</p><button className="button" onClick={() => { setSearch(''); setCategory('All parts'); }}>Clear filters</button></div>}</div>
+    <div className="table-scroll"><table className="inventory-table"><thead><tr><th>PART / DESCRIPTION</th><th>CATEGORY</th><th>ON HAND</th><th>HELD</th><th>AVAILABLE</th><th>UNIT COST</th><th>STOCK VALUE</th><th>STATUS</th><th></th></tr></thead><tbody>{visible.map(item => <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id} · {item.unit}{item.location ? ` · ${item.location}` : ''}</small>{item.supplier && <small>{item.supplier}</small>}</td><td><span className="category-label">{item.category}</span></td><td>{number(item.stock)} <span className="muted">{item.unit}</span></td><td>{number(item.reserved)}</td><td><strong>{number(item.available??item.stock)}</strong></td><td>{!costRoles.includes(user.role) ? 'Restricted' : money(item.price)}</td><td>{item.price == null ? '—' : money(item.stock * item.price)}</td><td><span className={`stock-label ${item.stock < item.reorder ? 'low' : item.price == null ? 'unpriced' : ''}`}><i />{item.stock < item.reorder ? 'Low stock' : item.price == null ? 'Needs pricing' : 'In stock'}</span></td><td><IconButton icon={Settings2} label={`Edit ${item.name}`} disabled={!canEdit} onClick={() => onEdit(item)} /></td></tr>)}</tbody></table>{!visible.length && <div className="empty-state"><Search size={30} /><h3>No matching parts</h3><p>Try another part name or category.</p><button className="button" onClick={() => { setSearch(''); setCategory('All parts'); }}>Clear filters</button></div>}</div>
     <p className="table-footnote">Stock is tracked independently from project estimates. Saving a design does not reserve or consume inventory.</p>
   </main>;
 }
+
+function MapLocationIcon(){return <Warehouse size={22} strokeWidth={1.4}/>;}
 
 const money = value => value == null ? 'Not priced' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: Number.isInteger(value) ? 0 : 2, maximumFractionDigits: 2 }).format(value);
 const number = value => new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 }).format(value);
@@ -59,26 +64,25 @@ function AuthDialog({ setup, onClose, onSuccess }) {
   return <Modal title={setup ? 'Create your workspace' : 'Welcome back'} subtitle={setup ? 'The first account becomes the workspace administrator.' : 'Sign in to your Accu-Steel workspace.'} onClose={onClose}><form onSubmit={submit} className="form-stack">{setup && <label>Full name<input name="name" autoComplete="name" minLength={2} required placeholder="Your name" /></label>}<label>Work email<input name="email" type="email" autoComplete="username" required placeholder="you@accusteel.com" /></label><label>Password<input name="password" type="password" autoComplete={setup ? 'new-password' : 'current-password'} required minLength={setup ? 12 : 1} maxLength={72} placeholder={setup ? 'At least 12 characters' : 'Your password'} /></label>{twoFactor && <label>Authenticator code<input name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" required autoFocus /></label>}{error && <p className="form-error" role="alert">{error}</p>}<button className="button primary full" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <LockKeyhole size={16} />}{setup ? 'Create workspace' : 'Sign in'}</button><p className="form-note"><ShieldCheck size={14} /> Private workspace · Role-based access</p></form></Modal>;
 }
 
-function AccountDialog({ user, onClose, onUser, notify, onLogout }) {
+function AccountDialog({ user, onClose, onUser, notify, onLogout, onManagePeople }) {
   const [setup, setSetup] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [members, setMembers] = useState([]);
-  const [tab, setTab] = useState('security');
-  useEffect(() => { if (user.role === 'admin') api('/users').then(setMembers).catch(error => setError(error.message)); }, []);
   async function begin() { setBusy(true); try { setSetup(await api('/auth/2fa/setup', {})); } catch (error) { setError(error.message); } finally { setBusy(false); } }
   async function verify(event) {
     event.preventDefault(); setBusy(true); setError('');
     try { const data = await api('/auth/2fa/verify', { code: new FormData(event.currentTarget).get('code') }); onUser(data.user); setSetup(null); notify('Two-factor authentication enabled.'); }
     catch (error) { setError(error.message); } finally { setBusy(false); }
   }
-  async function invite(event) {
-    event.preventDefault(); setBusy(true); setError('');
-    const form = event.currentTarget;
-    try { await api('/users', Object.fromEntries(new FormData(form))); setMembers(await api('/users')); form.reset(); notify('Team member created. Share credentials through a secure channel.'); }
-    catch (error) { setError(error.message); } finally { setBusy(false); }
-  }
-  return <Modal title="Workspace settings" subtitle={`${user.name} · ${user.email}`} onClose={onClose}><div className="dialog-tabs"><button className={tab === 'security' ? 'selected' : ''} onClick={() => setTab('security')}><ShieldCheck size={15} /> Security</button>{user.role === 'admin' && <button className={tab === 'team' ? 'selected' : ''} onClick={() => setTab('team')}><Users size={15} /> Team</button>}</div>{tab === 'security' ? <div className="form-stack"><div className="security-status"><ShieldCheck size={24} /><div><strong>Two-factor authentication</strong><p>{user.twoFactor ? 'Enabled · authenticator app' : 'Not enabled for this account'}</p></div>{user.twoFactor && <Check size={18} />}</div>{!user.twoFactor && !setup && <button className="button primary" disabled={busy} onClick={begin}>Set up authenticator <ArrowRight size={15} /></button>}{setup && <form onSubmit={verify} className="form-stack"><img className="qr-code" src={setup.qr} alt="Authenticator enrollment QR code" /><p className="muted">Scan with your authenticator, then enter its six-digit code. Keep your authenticator backed up; self-service recovery is not yet available.</p><label>Manual setup key<code className="secret">{setup.secret}</code></label><label>Authenticator code<input name="code" inputMode="numeric" pattern="[0-9]{6}" required maxLength={6} autoComplete="one-time-code" /></label><button className="button primary" disabled={busy}>Verify & enable</button></form>}<div className="role-info"><span>Workspace role</span><strong className="capitalize">{user.role}</strong></div></div> : <div className="form-stack"><div className="member-list">{members.map(member => <div key={member.id}><span className="small-avatar">{member.name[0]}</span><div><strong>{member.name}</strong><small>{member.email}</small></div><span className="role-badge">{member.role}</span></div>)}</div><form className="form-stack" onSubmit={invite}><h3>Add team member</h3><label>Full name<input name="name" minLength={2} required /></label><label>Email<input name="email" type="email" required /></label><label>Initial password<input name="password" type="password" minLength={12} maxLength={72} required autoComplete="new-password" /></label><label>Access role<select name="role"><option value="engineer">Engineer · designs & projects</option><option value="estimator">Estimator · inventory & costs</option><option value="viewer">Viewer · read-only, no costs</option><option value="admin">Administrator · full access</option></select></label><button className="button primary" disabled={busy}><Plus size={15} /> Add member</button></form></div>}{error && <p className="form-error" role="alert">{error}</p>}<div className="account-footer"><button className="button" onClick={onLogout}><LogOut size={14} /> Sign out of workspace</button></div></Modal>;
+  return <Modal title="Workspace settings" subtitle={`${user.name} · ${user.email}`} onClose={onClose}>
+    <div className="form-stack"><div className="security-status"><ShieldCheck size={24}/><div><strong>Two-factor authentication</strong><p>{user.twoFactor?'Enabled · authenticator app':'Not enabled for this account'}</p></div>{user.twoFactor&&<Check size={18}/>}</div>
+      {!user.twoFactor&&!setup&&<button className="button primary" disabled={busy} onClick={begin}>Set up authenticator <ArrowRight size={15}/></button>}
+      {setup&&<form onSubmit={verify} className="form-stack"><img className="qr-code" src={setup.qr} alt="Authenticator enrollment QR code"/><p className="muted">Scan with your authenticator, then enter its code. Back up the authenticator; self-service recovery is not available.</p><label>Manual setup key<code className="secret">{setup.secret}</code></label><label>Authenticator code<input name="code" inputMode="numeric" pattern="[0-9]{6}" required maxLength={6} autoComplete="one-time-code"/></label><button className="button primary" disabled={busy}>Verify & enable</button></form>}
+      <div className="role-info"><span>Workspace role</span><strong className="capitalize">{user.role}</strong></div><div className="role-info"><span>Work location</span><strong>{user.locationId||'MAIN'}</strong></div>
+      {user.role==='admin'&&<button className="button" onClick={onManagePeople}><Users size={15}/> Manage people & locations</button>}
+      {error&&<p className="form-error" role="alert">{error}</p>}
+    </div><div className="account-footer"><button className="button" onClick={onLogout}><LogOut size={14}/> Sign out of workspace</button></div>
+  </Modal>;
 }
 
 function PartDialog({ part, onClose, onSave }) {
@@ -177,6 +181,8 @@ function WorkspaceApp({ account, onSignedOut }) {
   const [setupRequired, setSetupRequired] = useState(false);
   const [aiConnected, setAiConnected] = useState(false);
   const [inventory, setInventory] = useState([]);
+  const [inventoryLocation,setInventoryLocation]=useState(account.locationId||'MAIN');
+  const [locations,setLocations]=useState([]);
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState(null);
   const [savedModel, setSavedModel] = useState(null);
@@ -203,6 +209,8 @@ function WorkspaceApp({ account, onSignedOut }) {
   const dirty = JSON.stringify(building) !== savedModel;
   const notify = message => setToast(message);
   async function reloadProjects() { const data = await api('/projects'); setProjects(data); return data; }
+  async function reloadLocations(){const data=await api('/locations');setLocations(data);return data;}
+  async function reloadInventory(){setInventory(await api(`/inventory?location=${encodeURIComponent(inventoryLocation)}`));}
   function workspaceChanged(settings) { setWorkspace(current => ({ ...current, ...settings })); if ('aiConnected' in settings) setAiConnected(settings.aiConnected); }
 
   useEffect(() => { api('/auth').then(data => { if (!data.user) onSignedOut(); else { setUser(data.user); setAiConnected(data.aiConnected); } }).catch(() => onSignedOut()); }, []);
@@ -210,9 +218,10 @@ function WorkspaceApp({ account, onSignedOut }) {
   useEffect(() => { try { localStorage.setItem(`accusteel-draft:${account.id}:${account.email}`, JSON.stringify(building)); } catch { notify('Local storage is unavailable. Export your project to keep a copy.'); } }, [building]);
   useEffect(() => {
     if (!user) { setInventory(initialInventory); setProjects([]); return; }
-    api('/inventory').then(setInventory).catch(error => notify(error.message));
+    reloadLocations().catch(error=>notify(error.message));
     api('/projects').then(setProjects).catch(error => notify(error.message));
   }, [user]);
+  useEffect(()=>{reloadInventory().catch(error=>notify(error.message));},[inventoryLocation,user.id]);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(null), 5000); return () => clearTimeout(timer); }, [toast]);
   useEffect(() => { conversationRef.current?.scrollTo({ top: conversationRef.current.scrollHeight, behavior: 'smooth' }); }, [messages, proposal, aiBusy]);
 
@@ -270,7 +279,7 @@ function WorkspaceApp({ account, onSignedOut }) {
       <a href="#" className="brand" onClick={event => { event.preventDefault(); setTab('design'); }} aria-label="Accu-Steel Draft Studio"><span className="brand-symbol"><Warehouse size={23} strokeWidth={2} /></span><div><span className="brand-name">ACCU-STEEL<span className="brand-registered">®</span></span><span className="brand-subtitle">DRAFT STUDIO</span></div></a>
       <span className="header-divider" />
       <nav className="main-nav" aria-label="Workspace">
-        {[{ id: 'design', name: 'Design', icon: Box }, { id: 'projects', name: 'Projects', icon: FolderOpen }, { id: 'inventory', name: 'Inventory', icon: Package }, { id: 'support', name: 'Support', icon: MessageSquare }, ...(!user || user.role === 'admin' ? [{ id: 'admin', name: 'Admin', icon: ShieldCheck }] : [])].map(({ id, name, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={17} />{name}</button>)}
+        {[{ id: 'design', name: 'Design', icon: Box }, { id: 'projects', name: 'Projects', icon: FolderOpen }, { id: 'inventory', name: 'Inventory', icon: Package }, ...(logisticsRoles.includes(user.role)?[{id:'customers',name:'Customers',icon:Users},{id:'shipping',name:'Shipping',icon:Send}]:[]),{ id: 'support', name: 'Support', icon: MessageSquare }, ...(user.role === 'admin' ? [{ id: 'admin', name: 'Admin', icon: ShieldCheck }] : [])].map(({ id, name, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={17} />{name}</button>)}
       </nav>
       <div className="header-actions"><span className="workspace-label" title={workspace.name}><i />{workspace.name}</span><IconButton icon={CircleHelp} label="About Draft Studio" onClick={() => setModal('about')} /><span className="header-divider" />{user ? <button className="account-button" onClick={() => setModal('account')} title="Workspace settings"><span className="avatar">{user.name.split(' ').map(word => word[0]).slice(0, 2).join('')}</span><ChevronDown size={13} /></button> : <button className="button sign-in" onClick={() => setModal('auth')}><LogIn size={15} /> Sign in</button>}</div>
     </header>
@@ -302,21 +311,23 @@ function WorkspaceApp({ account, onSignedOut }) {
       </div>
     </>}
 
-    {tab === 'inventory' && <InventoryPage inventory={inventory} user={user} onEdit={item => { setPart(item); setModal('part'); }} onAdd={() => { setPart(null); setModal('part'); }} onImport={() => setModal('inventory-import')} onExport={() => download('inventory.csv', inventoryCsv(inventory), 'text/csv')} />}
+    {tab === 'inventory' && <InventoryPage inventory={inventory} user={user} locations={locations} locationId={inventoryLocation} onLocationChange={setInventoryLocation} onEdit={item => { setPart(item); setModal('part'); }} onAdd={() => { setPart(null); setModal('part'); }} onImport={() => setModal('inventory-import')} onExport={async()=>{try{const items=inventoryLocation==='all'?await api('/inventory?location=all&flat=true'):inventory;download('inventory.csv',inventoryCsv(items),'text/csv');}catch(error){notify(error.message);}}} />}
+    {tab==='customers'&&logisticsRoles.includes(user.role)&&<CustomersPage notify={notify}/>}
+    {tab==='shipping'&&logisticsRoles.includes(user.role)&&<ShippingPage user={user} notify={notify} onStockChanged={reloadInventory}/>}
     {tab === 'projects' && <ProjectCenter user={user} projects={projects} onReload={reloadProjects} onOpen={openProject} onSignIn={() => setModal('auth')} notify={notify} />}
     {tab === 'support' && <SupportCenter user={user} projects={projects} supportEmail={workspace.supportEmail} onSignIn={() => setModal('auth')} notify={notify} />}
-    {tab === 'admin' && <AdminCenter user={user} notify={notify} onWorkspaceChange={workspaceChanged} onSecurity={() => setModal(user ? 'account' : 'auth')} onSupport={() => setTab('support')} onSignIn={() => setModal('auth')} />}
+    {tab === 'admin' && <AdminCenter user={user} notify={notify} onWorkspaceChange={workspaceChanged} onSecurity={() => setModal(user ? 'account' : 'auth')} onSupport={() => setTab('support')} onSignIn={() => setModal('auth')} onLocationsChanged={reloadLocations} />}
 
     <footer className="app-status"><div><span className="status-indicator" /> DRAFT STUDIO <span className="status-version">v0.1</span><span className="status-rule" /><span>Preliminary design workspace</span></div><div><span>Audubon, Iowa</span><span className="status-rule" /><span>Imperial (ft / in)</span><span className="status-rule" /><span className="status-scale">{user ? `${user.role} access` : 'Local draft'}</span></div></footer>
     {toast && <div className="toast" role="status"><Check size={16} /><span>{toast}</span><IconButton icon={X} label="Dismiss notification" onClick={() => setToast(null)} /></div>}
     {modal === 'auth' && <AuthDialog setup={setupRequired} onClose={() => setModal(null)} onSuccess={account => { setUser(account); setSetupRequired(false); setModal(null); notify('Welcome to your workspace.'); }} />}
-    {modal === 'account' && user && <AccountDialog user={user} onClose={() => setModal(null)} onUser={setUser} notify={notify} onLogout={async () => { try { await api('/auth/logout', {}); onSignedOut(); } catch (error) { notify(error.message); } }} />}
-    {modal === 'inventory-import' && <InventoryImport inventory={inventory} onClose={() => setModal(null)} onImported={async result => { setInventory(await api('/inventory')); setModal(null); notify(`Inventory imported: ${result.counts.add} added, ${result.counts.update} updated, ${result.counts.skip} skipped.`); }} />}
+    {modal === 'account' && user && <AccountDialog user={user} onClose={() => setModal(null)} onUser={setUser} notify={notify} onManagePeople={()=>{setModal(null);setTab('admin');}} onLogout={async () => { try { await api('/auth/logout', {}); onSignedOut(); } catch (error) { notify(error.message); } }} />}
+    {modal === 'inventory-import' && <InventoryImport inventory={inventory} locations={locations} locationId={inventoryLocation} onClose={() => setModal(null)} onImported={async result => {const site=result.locationId||inventoryLocation;setInventoryLocation(site);setInventory(await api(`/inventory?location=${encodeURIComponent(site)}`));setModal(null);notify(`Inventory imported: ${result.counts.add} added, ${result.counts.update} updated, ${result.counts.skip} skipped.`); }} />}
     {modal === 'import' && <ImportDialog onClose={() => setModal(null)} onImport={imported} />}
     {modal === 'export' && <ExportDialog building={building} materials={materials} onClose={() => setModal(null)} notify={notify} />}
     {modal === 'site' && <Modal wide title="Site & openings" subtitle="Manual site, wall, floor, and opening parameters · engineering review required." onClose={() => setModal(null)}><SiteControls building={building} canEdit={canDesign} onSave={changes => { update(changes); setModal(null); notify('Construction geometry and material takeoff updated. Engineering release remains pending.'); }} /></Modal>}
     {modal === 'construction' && <Modal wide title="Construction schedule" subtitle="Calculated from the current building revision · review before fabrication." onClose={() => setModal(null)}><ConstructionReport building={building} /></Modal>}
-    {modal === 'part' && <PartDialog part={part} onClose={() => setModal(null)} onSave={async item => { await api('/inventory', item); setInventory(await api('/inventory')); setModal(null); notify('Inventory part saved. Project estimates are up to date.'); }} />}
+    {modal === 'part' && <PartDialog part={part} onClose={() => setModal(null)} onSave={async item => {if(inventoryLocation==='all')throw new Error('Choose one inventory location before editing quantities.');await api('/inventory',{...item,location_id:part?.location_id||inventoryLocation});await reloadInventory();setModal(null);notify('Inventory balance and material costs saved.'); }} />}
     {modal === 'about' && <Modal title="Accu-Steel Draft Studio" subtitle="A connected foundation for your next building." onClose={() => setModal(null)}><div className="form-stack"><p className="about-copy">A working design prototype for parametric fabric-covered steel structures, preliminary material takeoffs, and inventory costs.</p><div className="notice"><ShieldCheck size={21} /><p><strong>Not construction-ready engineering.</strong> Frame sizes, loads, connections, foundations, fire ratings, and site-specific code compliance require a licensed engineer. Catalog prices and quantities are illustrative.</p></div><p className="muted">DXF imports are reference-only. Native AutoCAD DWG editing, certified structural calculations, and arbitrary 3D part modeling are not implemented. Local commands are deterministic; connected AI requires a server-side API key.</p><a className="button" href="https://accusteel.com" target="_blank" rel="noreferrer">Accu-Steel <ArrowUpRight size={15} /></a></div></Modal>}
   </div>;
 }

@@ -1,14 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Save } from 'lucide-react';
 import { api } from './client.js';
 import { Modal } from './ui.jsx';
 
 export function UserProfileFields({ user = {}, includeIdentity = false }) {
+  const [locations,setLocations]=useState([{id:user.locationId||'MAIN',name:user.locationId||'Primary location',active:true}]);
+  useEffect(()=>{api('/locations').then(setLocations).catch(()=>{});},[]);
   return <>
     {includeIdentity && <><label>Full name<input name="name" defaultValue={user.name} required minLength={2} maxLength={80} autoComplete="name" /></label><label>Work email<input name="email" type="email" defaultValue={user.email} required autoComplete="email" /></label></>}
     <label>Address<textarea aria-label="Address" name="address" defaultValue={user.address || ''} maxLength={500} rows={2} autoComplete="street-address" /></label>
     <div className="form-grid"><label>Phone number<input name="phone" type="tel" defaultValue={user.phone || ''} maxLength={40} autoComplete="tel" /></label><label>Department<input name="department" defaultValue={user.department || ''} maxLength={80} /></label></div>
     <label>Job title<input name="jobTitle" defaultValue={user.jobTitle || ''} maxLength={80} /></label>
+    <label>Work location<select aria-label="Employee work location" name="locationId" defaultValue={user.locationId||'MAIN'} required>{locations.map(location=><option key={location.id} value={location.id} disabled={!location.active}>{location.name}{!location.active?' (inactive)':''}</option>)}</select></label>
   </>;
 }
 

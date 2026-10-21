@@ -15,6 +15,7 @@ import { registerWorkspace } from './workspace.js';
 import { credentialsSchema, profileSchema } from './accounts.js';
 import { inventoryItemSchema } from '../shared/inventory.js';
 import { registerInventoryImport } from './inventory.js';
+import { registerOperations } from './operations.js';
 
 export function createApp({ databasePath = process.env.DATABASE_PATH || 'data/studio.sqlite', encryptionKey } = {}) {
   if (databasePath !== ':memory:') mkdirSync(dirname(databasePath), { recursive: true });
@@ -60,7 +61,7 @@ export function createApp({ databasePath = process.env.DATABASE_PATH || 'data/st
     next();
   });
   const audit = (req, action, detail) => db.prepare('INSERT INTO audit (actor,action,detail) VALUES (?,?,?)').run(req.user?.id || null, action, JSON.stringify(detail));
-  const publicUser = user => ({ id: user.id, name: user.name, email: user.email, role: user.role, twoFactor: Boolean(user.totp), disabled: Boolean(user.disabled), address: user.address || '', phone: user.phone || '', department: user.department || '', jobTitle: user.job_title || '' });
+  const publicUser = user => ({ id: user.id, name: user.name, email: user.email, role: user.role, twoFactor: Boolean(user.totp), disabled: Boolean(user.disabled), address: user.address || '', phone: user.phone || '', department: user.department || '', jobTitle: user.job_title || '',locationId:user.location_id||'MAIN' });
   const allow = (...roles) => (req, res, next) => !req.user ? res.status(401).json({ error: 'Sign in to access your workspace.' }) : roles.length && !roles.includes(req.user.role) ? res.status(403).json({ error: 'Your role does not permit this action.' }) : next();
   const authLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Too many attempts. Please try again in 15 minutes.' } });
   const setSession = (res, user) => {
@@ -72,7 +73,8 @@ export function createApp({ databasePath = process.env.DATABASE_PATH || 'data/st
   const credentials = credentialsSchema;
   const totpFor = (secret, user) => new OTPAuth.TOTP({ issuer: 'Accu-Steel Draft Studio', label: user.email, algorithm: 'SHA1', digits: 6, period: 30, secret: OTPAuth.Secret.fromBase32(secret) });
   const { aiConfig, workspaceSettings } = registerWorkspace({ app, db, allow, audit, publicUser, seal, unseal });
-  registerInventoryImport({ app, db, allow, audit });
+  const {inventoryAt,saveItem,activeLocation}=registerOperations({app,db,allow,audit});
+  registerInventoryImport({ app, db, allow, audit,inventoryAt,saveItem });
   app.get('/api/auth', (req, res) => res.json({ user: req.user ? publicUser(req.user) : null, setupRequired: !db.prepare('SELECT id FROM users LIMIT 1').get(), aiConnected: Boolean(req.user && workspaceSettings().aiConnected) }));
   app.post('/api/auth/register', authLimit, (req, res) => res.status(403).json({ error: 'Public registration is disabled. Management must provision your account.' }));
   app.post('/api/auth/login', authLimit, async (req, res) => {
@@ -115,9 +117,11 @@ export function createApp({ databasePath = process.env.DATABASE_PATH || 'data/st
     const parsed = credentials.extend({ role: z.enum(roles) }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Name, email, role, and a 12-72 character password are required.' });
     const data = parsed.data;
+    if(!activeLocation(data.locationId))return res.status(400).json({error:'Choose an active work location.'});
     const password = await bcrypt.hash(data.password, 12);
     try {
-      const result = db.prepare('INSERT INTO users (name,email,password,role,address,phone,department,job_title) VALUES (?,?,?,?,?,?,?,?)').run(data.name, data.email, password, data.role, data.address, data.phone, data.department, data.jobTitle);
+      if(!activeLocation(data.locationId))return res.status(400).json({error:'Choose an active work location.'});
+      const result = db.prepare('INSERT INTO users (name,email,password,role,address,phone,department,job_title,location_id) VALUES (?,?,?,?,?,?,?,?,?)').run(data.name, data.email, password, data.role, data.address, data.phone, data.department, data.jobTitle,data.locationId);
       audit(req, 'user.create', { id: Number(result.lastInsertRowid), role: data.role });
       res.status(201).json({ ok: true });
     } catch { res.status(409).json({ error: 'An account with that email already exists.' }); }
@@ -130,22 +134,21 @@ export function createApp({ databasePath = process.env.DATABASE_PATH || 'data/st
     if (!target) return res.status(404).json({ error: 'Account not found.' });
     const data = parsed.data;
     if (db.prepare('SELECT id FROM users WHERE email=? AND id<>?').get(data.email, id)) return res.status(409).json({ error: 'Another account already uses that email.' });
-    db.prepare('UPDATE users SET name=?,email=?,address=?,phone=?,department=?,job_title=? WHERE id=?').run(data.name, data.email, data.address, data.phone, data.department, data.jobTitle, id);
+    if(!activeLocation(data.locationId))return res.status(400).json({error:'Choose an active work location.'});
+    db.prepare('UPDATE users SET name=?,email=?,address=?,phone=?,department=?,job_title=?,location_id=? WHERE id=?').run(data.name, data.email, data.address, data.phone, data.department, data.jobTitle,data.locationId, id);
     if (target.email !== data.email) db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
     audit(req, 'user.profile.update', { id, fields: ['name', 'email', 'address', 'phone', 'department', 'jobTitle'], sessionsRevoked: target.email !== data.email });
     res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id)), requiresSignIn: target.email !== data.email && id === req.user.id });
   });
   app.get('/api/inventory', allow(), (req, res) => {
-    const items = db.prepare('SELECT * FROM inventory ORDER BY id').all();
-    res.json(items.map(item => costRoles.includes(req.user.role) ? item : { ...item, price: null }));
+    try{const items=inventoryAt(req.query.location||req.user.location_id||'MAIN',req.query.flat==='true');res.json(items.map(item=>costRoles.includes(req.user.role)?item:{...item,price:null}));}catch(error){res.status(400).json({error:error.message});}
   });
   const itemSchema = inventoryItemSchema;
   app.post('/api/inventory', allow('admin', 'estimator'), (req, res) => {
-    const parsed = itemSchema.safeParse(req.body);
+    const parsed = itemSchema.safeParse({...req.body,location_id:req.body.location_id||req.user.location_id||'MAIN'});
     if (!parsed.success) return res.status(400).json({ error: 'Check the part ID, unit, stock, and cost. Leave unknown costs blank.' });
     const item = parsed.data;
-    db.prepare('INSERT INTO inventory (id,name,category,unit,stock,price,reorder,location,supplier) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,category=excluded.category,unit=excluded.unit,stock=excluded.stock,price=excluded.price,reorder=excluded.reorder,location=excluded.location,supplier=excluded.supplier').run(item.id, item.name, item.category, item.unit, item.stock, item.price, item.reorder, item.location, item.supplier);
-    audit(req, 'inventory.save', item);
+    db.exec('BEGIN IMMEDIATE');try{saveItem(item,req.user.id);audit(req,'inventory.save',{id:item.id,locationId:item.location_id});db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');return res.status(409).json({error:error.message});}
     res.json({ ok: true });
   });
   app.get('/api/projects', allow(), (req, res) => res.json(db.prepare('SELECT projects.*,users.name AS author_name FROM projects JOIN users ON users.id=projects.author ORDER BY updated DESC').all().map(project => ({ ...project, building: JSON.parse(project.building) }))));
