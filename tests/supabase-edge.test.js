@@ -23,3 +23,14 @@ test('Supabase function rejects missing sessions, nonstaff accounts, unapproved 
   const viewer = createWorkspaceHandler({ createClient: mock({ id: 'staff-id', role: 'viewer' }), env });
   assert.equal((await viewer(request({ path: '/users', method: 'POST', body: {} }, { Authorization: `Bearer ${token}` }))).status, 403);
 });
+
+test('hosted design and provider routes stay disabled without contacting an AI provider',async()=>{
+  let providerCalls=0;
+  const createClient=()=>({auth:{getUser:async()=>({data:{user:{id:'staff-id',factors:[]}},error:null})},rpc:async()=>({data:'admin',error:null}),from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{id:'staff-id',role:'admin',disabled:false},error:null})})})})});
+  const handler=createWorkspaceHandler({createClient,env,fetchProvider:async()=>{providerCalls++;throw new Error('Unexpected provider request.');}});
+  for(const path of ['/ai/design','/admin/integrations/openai','/admin/integrations/openai/test']){
+    const response=await handler(request({path,method:'POST',body:{prompt:'Make it 80 ft wide',building:{}}},{Authorization:`Bearer ${token}`}));
+    assert.equal(response.status,410,path);
+  }
+  assert.equal(providerCalls,0);
+});

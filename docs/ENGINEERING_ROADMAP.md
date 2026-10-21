@@ -71,12 +71,13 @@ Add a dedicated review/release process with:
 
 ## Gate 5: Constrain AI To Auditable Operations
 
-AI can interpret intent, find approved parts, propose parameter/assembly changes, and summarize validation failures. It must not be the source of engineering truth.
+**No AI provider is currently connected.** Provider selection is deferred pending research. If a provider is selected later, AI may interpret intent into a typed proposal or summarize validation failures; it must not be the source of engineering truth. The existing local command parser remains deterministic and limited.
 
 - Limit AI tools to typed, authorized, versioned operations against the authoritative model.
 - Validate units, supported envelopes, permissions, geometric constraints, product rules, and structural checks independently of the language model.
 - Record proposals, differences, validation results, model/provider version where available, and the human decision.
 - Never treat a natural-language claim of safety or compliance as a passed engineering check.
+- Keep structural parameters distinct: primary frame/truss station spacing is not purlin spacing. Both need approved product-family rules, geometry, supported bounds, quantity reconciliation, and independent calculation checks before natural-language editing is enabled.
 - Require review and invalidate affected approvals after changes. Plan for outages, malformed output, prompt injection from imported material, and provider/data-retention policy.
 
 **Acceptance:** tests that demonstrate unsupported, unsafe, unauthorized, ambiguous, and adversarial requests cannot bypass the validated engineering/release path.

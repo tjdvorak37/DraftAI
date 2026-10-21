@@ -376,11 +376,6 @@ test('account setup, persistent projects, custom prices, and two-factor sign-in'
   await page.getByRole('tab', { name: 'Integrations', exact: true }).click();
   await expect(page.getByText('SMS management', { exact: true })).toHaveCount(0);
   await expect(page.getByText('EchoAIPro', { exact: true })).toHaveCount(0);
-  await page.getByLabel('API key', { exact: true }).fill('test-only-not-a-real-provider-key');
-  await page.getByLabel('Enable AI design requests', { exact: true }).uncheck();
-  await page.getByRole('button', { name: 'Save connection', exact: true }).click();
-  await expect(page.getByLabel('API key', { exact: true })).toHaveValue('');
-  await expect(page.getByText('Key source: workspace.', { exact: false })).toBeVisible();
   await page.screenshot({ path: '/tmp/accusteel-admin.png', fullPage: true });
   await page.getByRole('button', { name: 'Projects', exact: true }).click();
   await page.getByRole('button', { name: 'New project', exact: true }).click();

@@ -194,8 +194,6 @@ export function AdminCenter({
   const [busy, setBusy] = useState(false);
   const [invite, setInvite] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [integrationKey, setIntegrationKey] = useState("");
-  const [connectionResult, setConnectionResult] = useState("");
   async function load() {
     try {
       const [settings, users] = await Promise.all([
@@ -243,22 +241,6 @@ export function AdminCenter({
       notify(
         "Team member created. Share the initial password through a secure channel.",
       );
-    });
-  }
-  async function saveIntegration(event) {
-    event.preventDefault();
-    const values = new FormData(event.currentTarget);
-    await run(async () => {
-      const result = await api("/admin/integrations/openai", {
-        model: values.get("model"),
-        enabled: values.has("enabled"),
-        ...(integrationKey ? { apiKey: integrationKey } : {}),
-      });
-      setIntegrationKey("");
-      setConnectionResult("");
-      onWorkspaceChange({ aiConnected: result.aiConnected });
-      await load();
-      notify("OpenAI integration settings saved.");
     });
   }
   return (
@@ -361,10 +343,10 @@ export function AdminCenter({
                       </strong>
                     </div>
                     <div>
-                      <span>Connected AI</span>
+                      <span>AI integration</span>
                       <strong className="metric-text">
-                        {data.aiConnected ? "Configured" : "Not configured"}
-                        <small>OpenAI design integration</small>
+                        Under review
+                        <small>Provider selection is pending research</small>
                       </strong>
                     </div>
                   </div>
@@ -514,119 +496,21 @@ export function AdminCenter({
                           <Sparkles size={23} />
                         </span>
                         <div>
-                          <h2>OpenAI</h2>
-                          <p>Design conversation provider</p>
+                          <h2>AI providers</h2>
+                          <p>Provider selection is intentionally open</p>
                         </div>
                       </div>
                       <span
-                        className={`status-pill ${data.aiConnected ? "success" : ""}`}
+                        className="status-pill"
                       >
-                        {data.aiConnected ? "Configured" : "Not connected"}
+                        Under review
                       </span>
                     </div>
-                    <form
-                      key={`${data.integrations.openai.model}-${data.integrations.openai.enabled}`}
-                      className="form-stack"
-                      onSubmit={saveIntegration}
-                    >
-                      <label>
-                        API key
-                        <input
-                          type="password"
-                          autoComplete="new-password"
-                          value={integrationKey}
-                          onChange={(event) =>
-                            setIntegrationKey(event.target.value)
-                          }
-                          placeholder={
-                            data.integrations.openai.configured
-                              ? "Key stored securely · leave blank to keep"
-                              : "Enter your OpenAI API key"
-                          }
-                          minLength={10}
-                          maxLength={500}
-                        />
-                      </label>
-                      <label>
-                        Model
-                        <input
-                          name="model"
-                          required
-                          pattern="[a-zA-Z0-9._:-]{1,100}"
-                          defaultValue={data.integrations.openai.model}
-                        />
-                      </label>
-                      <label className="checkbox-label">
-                        <input
-                          name="enabled"
-                          type="checkbox"
-                          defaultChecked={data.integrations.openai.enabled}
-                        />{" "}
-                        Enable AI design requests
-                      </label>
-                      <p className="muted">
-                        Key source: {data.integrations.openai.source}. Keys are
-                        encrypted on the server and never returned to the
-                        browser. Design prompts are sent to OpenAI; provider
-                        charges apply.
-                      </p>
-                      <div className="button-group wrap">
-                        <button className="button primary" disabled={busy}>
-                          <Save size={14} /> Save connection
-                        </button>
-                        <button
-                          type="button"
-                          className="button"
-                          disabled={busy || !data.aiConnected}
-                          onClick={() =>
-                            run(async () => {
-                              const result = await api(
-                                "/admin/integrations/openai/test",
-                                {},
-                              );
-                              setConnectionResult(result.message);
-                            })
-                          }
-                        >
-                          <Plug size={14} /> Test connection
-                        </button>
-                        {data.integrations.openai.source === "workspace" && (
-                          <button
-                            type="button"
-                            className="button danger-text"
-                            disabled={busy}
-                            onClick={() => {
-                              if (
-                                confirm(
-                                  "Remove the stored OpenAI key and disable AI requests?",
-                                )
-                              )
-                                run(async () => {
-                                  await api("/admin/integrations/openai", {
-                                    model: data.integrations.openai.model,
-                                    enabled: false,
-                                    removeKey: true,
-                                  });
-                                  onWorkspaceChange({ aiConnected: false });
-                                  setConnectionResult("");
-                                  await load();
-                                  notify(
-                                    "Stored key removed; integration disabled.",
-                                  );
-                                });
-                            }}
-                          >
-                            Remove stored key
-                          </button>
-                        )}
-                      </div>
-                      {connectionResult && (
-                        <p className="connection-success" role="status">
-                          <CheckCircle2 size={16} />
-                          {connectionResult}
-                        </p>
-                      )}
-                    </form>
+                    <div className="form-stack">
+                      <p className="muted">No external AI provider is connected. The design assistant currently runs supported dimensional commands locally; prompts and building data are not sent to an AI service.</p>
+                      <p className="muted">Provider selection will follow research into data handling, costs, and tool support. Any future integration must not make structural, code-compliance, or fabrication decisions.</p>
+                      <p className="muted">Structural spacing, member sizes, loads, connections, and foundations require explicit approved rules and qualified engineering review, regardless of provider.</p>
+                    </div>
                   </section>
                 </div>
               )}
