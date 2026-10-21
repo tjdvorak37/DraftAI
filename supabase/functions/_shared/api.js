@@ -3,6 +3,7 @@ import { buildingSchema, parseDesignCommand } from '../../../shared/model.js';
 import { inventoryItemSchema, inventoryFields, previewInventoryImport } from '../../../shared/inventory.js';
 import { roles, designRoles, costRoles, supportRoles, projectStatuses, ticketStatuses, ticketPriorities } from '../../../shared/access.js';
 import { routeOperations } from './operations.js';
+import { routeSupply } from './supply.js';
 
 const profileSchema = z.object({ name: z.string().trim().min(2).max(80), email: z.email().max(254).transform(value => value.toLowerCase()), address: z.string().max(500).default(''), phone: z.string().max(40).default(''), department: z.string().max(80).default(''), jobTitle: z.string().max(80).default(''), locationId:z.string().regex(/^[A-Z0-9][A-Z0-9_-]{0,23}$/).default('MAIN') });
 const creationSchema = profileSchema.extend({ password: z.string().min(12).max(72), role: z.enum(roles) });
@@ -82,6 +83,7 @@ export function createWorkspaceHandler({ createClient, env, fetchProvider = fetc
       const directory = async () => checked(await service.from('profiles').select('id,name,role').eq('disabled', false));
       const operations=await routeOperations({path,method,body,service,user,identity,profile,permit,checked,audit,failure});
       if(operations)return respond(operations.data);
+      const supply=await routeSupply({path,method,body,service,user,profile,permit,checked,failure,query:incomingPath.searchParams});if(supply)return respond(supply.data);
       if (path === '/auth' && method === 'GET') return respond({ user: publicProfile(profile, identity.factors), aiConnected: (await workspace()).aiConnected, setupRequired: false });
       if (path === '/auth/register') throw failure('Public registration is disabled. Management provisions all accounts.', 403);
       if (path === '/workspace' && method === 'GET') return respond(await workspace());

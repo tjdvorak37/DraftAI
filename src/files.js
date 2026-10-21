@@ -1,5 +1,5 @@
 import DxfParser from 'dxf-parser';
-import { buildingSchema, constructionTakeoff, longitudinalMembers, buildingMetrics } from '../shared/model.js';
+import { buildingSchema, constructionTakeoff, longitudinalMembers, buildingMetrics, floorTakeoff } from '../shared/model.js';
 
 export function download(name, content, type = 'application/json') {
   const url = URL.createObjectURL(new Blob([content], { type }));
@@ -81,6 +81,11 @@ export function constructionCsv(building) {
     ['Status', 'DIMENSIONAL TAKEOFF ONLY - NOT RELEASED FOR FABRICATION'],
     ['Excluded', 'Structural sizing, connections, reinforcement, footings, stock/kerf/splice optimization, and engineering approval'],
     ['Floor elevation ft', building.construction.floorElevation],
+    ['Concrete floor included',Boolean(building.floor?.enabled)],
+    ['Floor slab thickness in',building.floor?.enabled?building.floor.thickness:''],
+    ['Floor net concrete cu yd',floorTakeoff(building).netVolume],
+    ['Floor concrete allowance percent',building.floor?.wastePercent??0],
+    ['Floor order concrete cu yd',floorTakeoff(building).orderVolume],
     ['Wall thickness in', building.construction.wallThickness],
     ['Concrete cu yd', takeoff.concreteVolume], ['Excavation cu yd', takeoff.cutVolume],
     ['Net fill cu yd', takeoff.fillVolume], ['Fill factor', building.construction.fillFactor],

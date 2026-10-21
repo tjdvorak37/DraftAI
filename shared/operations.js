@@ -10,5 +10,5 @@ export const orderSchema = z.object({ requestKey: z.uuid(), kind: z.enum(['custo
   if (order.kind === 'transfer' && (!order.destinationLocation || order.destinationLocation === order.sourceLocation)) context.addIssue({ code: 'custom', message: 'Choose a different receiving location.' });
   if (order.kind === 'customer' && !order.customerId) context.addIssue({ code: 'custom', message: 'Choose a customer for this shipment.' });
 });
-export const orderActions = ['hold', 'dispatch', 'receive', 'deliver', 'cancel'];
-export const orderStatuses = ['draft', 'held', 'dispatched', 'received', 'delivered', 'cancelled'];
+export const orderActions = ['hold','stage','unstage', 'dispatch', 'receive', 'deliver', 'cancel'];
+export const orderStatuses = ['draft','awaiting_materials', 'held','staged', 'dispatched', 'received', 'delivered', 'cancelled'];

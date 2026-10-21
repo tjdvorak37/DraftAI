@@ -1,0 +1,74 @@
+.main-nav { min-width: 0; flex: 1; overflow-x: auto; }
+.main-nav button { flex-shrink: 0; white-space: nowrap; }
+.header-actions { flex-shrink: 0; }
+.stock-warning-button { position: relative; }
+.stock-warning-button span { position: absolute; right: -5px; top: -5px; min-width: 17px; padding: 2px; border-radius: 4px; color: #fff; background: #a43929; font-size: 10px; line-height: 13px; }
+.supply-summary { display: flex; gap: 24px; flex-wrap: wrap; padding: 16px 0; border-top: 1px solid var(--line); font-size: 12px; color: #5d6559; }
+.supply-summary span { display: inline-flex; align-items: center; gap: 8px; }
+.supply-page .management-tabs { overflow-x: auto; }
+.supply-page .management-tabs button { flex-shrink: 0; white-space: nowrap; }
+.receipt-count-table { min-width: 620px; }
+.receipt-count-table input { width: 110px; min-height: 38px; padding: 8px; border: 1px solid #b9c1b6; border-radius: 4px; background: white; }
+.receipt-history { border-top: 1px solid var(--line); padding-top: 16px; }
+.receipt-history article { padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.receipt-history article p { margin-top: 6px; overflow-wrap: anywhere; }
+.shipment-status-staged { color: #306c58; background: #e4f1e8; }
+.shipment-status-awaiting_materials { color: #8b5517; background: #fff0d5; }
+.yard-tag-preview > .button { margin: 0 0 20px; }
+.yard-tag-sheet { color: #171b17; background: white; border: 2px solid #313931; padding: 24px; overflow-wrap: anywhere; }
+.yard-tag-sheet header { display: flex; justify-content: space-between; gap: 16px; align-items: center; border-bottom: 3px solid #313931; padding-bottom: 12px; }
+.yard-tag-sheet header strong { font-family: 'Barlow Condensed', sans-serif; font-size: 26px; }
+.yard-tag-sheet header span { font-size: 11px; text-align: right; }
+.yard-tag-status { padding: 12px 0 4px; font-size: 12px; font-weight: 700; }
+.yard-tag-sheet h1 { font-size: 32px; line-height: 1.15; margin: 8px 0; }
+.yard-tag-customer { font-size: 24px; font-weight: 650; line-height: 1.2; }
+.yard-tag-position { margin: 20px 0; border: 2px solid #313931; padding: 14px; }
+.yard-tag-position span { display: block; font-size: 11px; margin-bottom: 6px; }
+.yard-tag-position strong { font-size: 28px; line-height: 1.2; }
+.yard-tag-sheet dl { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; margin: 20px 0; }
+.yard-tag-sheet dt { font-size: 10px; text-transform: uppercase; margin-bottom: 4px; }
+.yard-tag-sheet dd { margin: 0; font-size: 13px; }
+.yard-tag-sheet .yard-tag-id { font-family: monospace; font-size: 11px; }
+.yard-tag-sheet table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.yard-tag-sheet th, .yard-tag-sheet td { border-bottom: 1px solid #7d847b; padding: 10px 6px; text-align: left; vertical-align: top; }
+.yard-tag-sheet th { font-size: 10px; background: #f1f3ef; }
+.yard-tag-sheet td span { display: block; margin-top: 3px; }
+.yard-tag-sheet td:not(:first-child) { white-space: nowrap; }
+.yard-tag-notes { padding: 16px 0; font-size: 12px; }
+.yard-tag-notes p { margin-top: 6px; white-space: pre-wrap; }
+.yard-tag-sheet footer { border-top: 2px solid #313931; padding-top: 12px; margin-top: 20px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; font-size: 10px; }
+.yard-tag-disclaimer { font-size: 10px; margin-top: 14px; }
+.yard-print-root { display: none; }
+@media (max-width: 1700px) { .header-actions .workspace-label { display: none; } .app-header { gap: 18px; } .main-nav button { padding: 0 11px; } }
+@media (max-width: 1100px) {
+  .app-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 56px 42px; height: 98px; min-height: 98px; gap: 0 12px; padding: 0 14px; }
+  .app-header > .header-divider { display: none; }
+  .main-nav { grid-row: 2; grid-column: 1 / -1; margin: 0; width: 100%; gap: 0; }
+  .main-nav button { font-size: 11px; gap: 6px; padding: 0 12px; }
+  .header-actions { grid-row: 1; grid-column: 2; }
+  .header-actions > .stock-warning-button { display: inline-flex; }
+}
+@media (max-width: 600px) {
+  .supply-page .page-title { flex-wrap: wrap; gap: 14px; }
+  .supply-page .page-title h1 { font-size: 28px; }
+  .supply-summary { gap: 12px; }
+  .yard-tag-sheet { padding: 14px; }
+  .yard-tag-sheet h1 { font-size: 26px; }
+  .yard-tag-customer { font-size: 21px; }
+  .yard-tag-position strong { font-size: 24px; }
+  .yard-tag-sheet dl { grid-template-columns: 1fr; }
+}
+@media print {
+  @page { size: auto; margin: 12mm; }
+  html, body { height: auto !important; overflow: visible !important; background: white !important; }
+  body > :not(.yard-print-root) { display: none !important; }
+  dialog::backdrop { display: none !important; }
+  .yard-print-root { display: block !important; width: 100%; }
+  .yard-tag-sheet { border: 2px solid black; padding: 6mm; print-color-adjust: exact; }
+  .yard-tag-sheet h1 { font-size: 30pt; }
+  .yard-tag-customer { font-size: 23pt; }
+  .yard-tag-position strong { font-size: 27pt; }
+  .yard-tag-sheet dl { grid-template-columns: 1fr 1fr; }
+  .yard-tag-sheet thead { display: table-header-group; }
+  .yard-tag-sheet tr, .yard-tag-position, .yard-tag-sheet header, .yard-tag-sheet dl > div { break-inside: avoid; }
+}

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { locationSchema, customerSchema, orderSchema, orderActions, logisticsRoles } from '../../../shared/operations.js';
+import { supplyReadRoles,receivingRoles } from '../../../shared/purchasing.js';
 
 export async function routeOperations({ path, method, body, service, user, identity, profile, permit, checked, audit, failure }) {
   if (path === '/locations' && method === 'GET') return { data: checked(await service.from('locations').select('*').order('name')) };
@@ -24,21 +25,21 @@ export async function routeOperations({ path, method, body, service, user, ident
     await audit('customer.save',{id:saved.id});return {data:saved};
   }
   if(path==='/shipments' && method==='GET'){
-    permit(logisticsRoles);const orders=[];
-    for(let offset=0;;offset+=500){const page=checked(await user.from('stock_orders').select('*,stock_order_lines(part_id,quantity,description,unit),customers(name)').order('created',{ascending:false}).range(offset,offset+499));orders.push(...page);if(page.length<500)break;}
-    return {data:orders.map(order=>({...order,customer_name:order.customers?.name||'',lines:order.stock_order_lines.map(line=>({...line,name:line.description}))}))};
+    permit(supplyReadRoles);const orders=[];
+    for(let offset=0;;offset+=500){const page=checked(await user.from('stock_orders').select('*,stock_order_lines(part_id,quantity,reserved_quantity,description,unit)').order('created',{ascending:false}).range(offset,offset+499));orders.push(...page);if(page.length<500)break;}
+    return {data:orders.map(order=>({...order,customer_name:order.customer_snapshot?.name||'',lines:order.stock_order_lines.map(line=>({...line,name:line.description}))}))};
   }
   if(path==='/shipments' && method==='POST'){
     permit(logisticsRoles);const payload=orderSchema.parse(body);const id=checked(await user.rpc('create_stock_order',{payload}));return {data:{id}};
   }
   let match=path.match(/^\/shipments\/([a-f0-9-]+)\/action$/i);
   if(match && method==='POST'){
-    permit(logisticsRoles);const id=z.uuid().parse(match[1]);const data=z.object({action:z.enum(orderActions),revision:z.number().int().positive(),carrier:z.string().max(100).optional(),tracking:z.string().max(200).optional()}).parse(body);
-    const result=await user.rpc('transition_stock_order',{order_id:id,action:data.action,expected_revision:data.revision,carrier_value:data.carrier??null,tracking_value:data.tracking??null});
+    const id=z.uuid().parse(match[1]);const data=z.object({action:z.enum(orderActions),revision:z.number().int().positive(),carrier:z.string().max(100).optional(),tracking:z.string().max(200).optional(),yardArea:z.string().trim().max(160).optional()}).parse(body);permit(['stage','unstage','receive'].includes(data.action)?receivingRoles:logisticsRoles);
+    const result=await user.rpc('transition_stock_order',{order_id:id,action:data.action,expected_revision:data.revision,carrier_value:data.carrier??null,tracking_value:data.tracking??null,yard_area_value:data.yardArea??null});
     if(result.error)throw failure(result.error.message,409);return {data:result.data};
   }
   if(path==='/stock-movements' && method==='GET'){
-    permit(logisticsRoles);return {data:checked(await user.from('stock_movements').select('*').order('id',{ascending:false}).limit(500))};
+    permit(supplyReadRoles);return {data:checked(await user.from('stock_movements').select('*').order('id',{ascending:false}).limit(500))};
   }
   return null;
 }

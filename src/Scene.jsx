@@ -1,15 +1,17 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { buildingMetrics, roofHeightAt, siteElevationAt, constructionTakeoff, wallTopAt, sideWallPanels, longitudinalMembers } from '../shared/model.js';
+import { buildingMetrics, roofHeightAt, siteElevationAt, constructionTakeoff, wallTopAt, sideWallPanels, longitudinalMembers, floorTakeoff } from '../shared/model.js';
 
 const colors = { ivory: '#e6e4d6', white: '#f8f8f4', green: '#687a64', gray: '#a0a8a6' };
 
-export default function Scene({ building, view, cutaway, showGrid, showDimensions, wireframe, reference, resetKey, onSelect }) {
+export default function Scene({ building, view, cutaway, showGrid, showDimensions, wireframe, reference, resetKey, onSelect, onEdit, selectedPart }) {
   const host = useRef(null);
   const engine = useRef(null);
   const selection = useRef(onSelect);
   selection.current = onSelect;
+  const edit=useRef(onEdit);
+  edit.current=onEdit;
 
   useEffect(() => {
     const container = host.current;
@@ -79,23 +81,33 @@ export default function Scene({ building, view, cutaway, showGrid, showDimension
     resize.observe(container);
     const pointer = new THREE.Vector2();
     const raycaster = new THREE.Raycaster();
+    let selectionBox;
+    const clearSelection=()=>{if(selectionBox){scene.remove(selectionBox);selectionBox.geometry.dispose();selectionBox.material.dispose();selectionBox=null;}};
     let down;
     const pointerDown = event => { down = { x: event.clientX, y: event.clientY }; };
-    const pointerUp = event => {
+    const pointerUp = (event,openEditor=false) => {
       if (!down || Math.hypot(event.clientX - down.x, event.clientY - down.y) > 5) return;
       const bounds = renderer.domElement.getBoundingClientRect();
       pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
       raycaster.setFromCamera(pointer, camera);
       const selected = raycaster.intersectObjects(model.children, true).find(hit => hit.object.userData.part);
+      clearSelection();
+      if(selected){selectionBox=new THREE.BoxHelper(selected.object,'#b84a38');selectionBox.material.depthTest=false;scene.add(selectionBox);}
       selection.current?.(selected?.object.userData.part || null);
+      if(openEditor&&selected)edit.current?.(selected.object.userData.part);
     };
+    const doubleClick=event=>pointerUp(event,true);
     renderer.domElement.addEventListener('pointerdown', pointerDown);
     renderer.domElement.addEventListener('pointerup', pointerUp);
-    engine.current = { renderer, scene, camera, controls, model, grid, labels };
+    renderer.domElement.addEventListener('dblclick',doubleClick);
+    engine.current = { renderer, scene, camera, controls, model, grid, labels,ground,clearSelection };
     return () => {
       cancelAnimationFrame(animation);
       resize.disconnect();
       controls.dispose();
+      renderer.domElement.removeEventListener('pointerdown',pointerDown);
+      renderer.domElement.removeEventListener('pointerup',pointerUp);
+      renderer.domElement.removeEventListener('dblclick',doubleClick);
       scene.traverse(object => { object.geometry?.dispose(); if (object.material) for (const material of [].concat(object.material)) material.dispose(); });
       renderer.dispose();
       container.replaceChildren();
@@ -103,9 +115,12 @@ export default function Scene({ building, view, cutaway, showGrid, showDimension
     };
   }, []);
 
+  useEffect(()=>{if(!selectedPart)engine.current?.clearSelection();},[selectedPart]);
+
   useEffect(() => {
     if (!engine.current) return;
     const { model, labels, grid } = engine.current;
+    engine.current.clearSelection();
     model.traverse(object => { object.geometry?.dispose(); if (object.material) for (const material of [].concat(object.material)) material.dispose(); });
     model.clear();
     for (const label of labels) label.element.remove();
@@ -135,7 +150,14 @@ export default function Scene({ building, view, cutaway, showGrid, showDimension
       model.add(mesh);
       return mesh;
     };
-    box([width + 3.5, 0.5, length + 3.5], [0, -0.25, 0], new THREE.MeshStandardMaterial({ color: '#cbd0c8', roughness: 1 }), 'Level floor datum · foundation not designed');
+    const floor=floorTakeoff(building);
+    grid.position.y=building.floor.enabled?-floor.thicknessFeet-0.03:-0.32;
+    engine.current.ground.position.y=building.floor.enabled?-floor.thicknessFeet-0.05:-0.36;
+    if(building.floor.enabled){
+      box([width,floor.thicknessFeet,length],[0,-floor.thicknessFeet/2,0],new THREE.MeshStandardMaterial({color:'#c4c2b9',roughness:0.95}),'Concrete floor slab');
+      const outline=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(width,floor.thicknessFeet,length)),new THREE.LineBasicMaterial({color:'#a6a79d'}));
+      outline.position.y=-floor.thicknessFeet/2;model.add(outline);
+    }else box([width + 3.5, 0.08, length + 3.5], [0, -0.04, 0], new THREE.MeshStandardMaterial({ color: '#dbe0d5', transparent:true,opacity:0.5,roughness:1 }), 'Floor datum · no concrete slab specified');
     if (takeoff.adapted && takeoff.fillVolume > 0 && building.construction.fillMaterial !== 'unspecified') {
       const fillMaterial = new THREE.MeshStandardMaterial({ color: building.construction.fillMaterial === 'stone' ? '#b2b6ad' : '#aca58e', roughness: 1 });
       for (let index = 1; index < takeoff.profile.length; index++) {

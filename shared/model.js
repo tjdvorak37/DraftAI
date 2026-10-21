@@ -5,6 +5,7 @@ export { defaultConstruction, constructionTakeoff, wallTopAt, sideWallPanels, lo
 
 export const defaultWindow = { enabled: false, width: 4, height: 3, sill: 8, offset: 20, offsetFrom: 'south' };
 export const defaultSite = { startElevation: 0, endElevation: 0, slopeStart: 50, riseToward: 'north' };
+export const defaultFloor = { enabled: false, thickness: 6, wastePercent: 5 };
 
 export const buildingSchema = z.object({
   name: z.string().trim().min(1).max(100),
@@ -17,6 +18,7 @@ export const buildingSchema = z.object({
   endWalls: z.boolean(),
   doorWidth: z.number().min(0).max(40),
   doorHeight: z.number().min(0).max(28),
+  floor: z.object({ enabled: z.boolean(), thickness: z.number().min(2).max(36), wastePercent: z.number().min(0).max(30) }).default(defaultFloor),
   window: z.object({ enabled: z.boolean(), width: z.number().min(1).max(20), height: z.number().min(1).max(12), sill: z.number().min(0).max(30), offset: z.number().min(0).max(400), offsetFrom: z.enum(['south', 'north']) }).default(defaultWindow),
   site: z.object({ startElevation: z.number().min(-50).max(50), endElevation: z.number().min(-50).max(50), slopeStart: z.number().min(0).max(95), riseToward: z.enum(['north', 'south']) }).default(defaultSite),
   construction: z.object({ wallMode: z.enum(['none', 'concrete']), wallThickness: z.number().min(4).max(36), clearance: z.number().min(0).max(6), floorElevation: z.number().min(-50).max(50), columnMode: z.enum(['keep', 'wall-top']), fillMaterial: z.enum(['unspecified', 'stone', 'engineered-fill']), fillFactor: z.number().min(1).max(2) }).default(defaultConstruction),
@@ -42,6 +44,7 @@ export const defaultBuilding = {
   doorWidth: 20, doorHeight: 14,
   window: { ...defaultWindow }, site: { ...defaultSite },
   construction: { ...defaultConstruction },
+  floor: { ...defaultFloor },
 };
 
 export const initialInventory = [
@@ -58,6 +61,7 @@ export const initialInventory = [
   { id: 'ST-011', name: 'Stone fill · user-specified allowance', category: 'Custom', unit: 'cu yd', stock: 0, price: null, reorder: 0 },
   { id: 'EF-012', name: 'Engineered fill · user-specified allowance', category: 'Custom', unit: 'cu yd', stock: 0, price: null, reorder: 0 },
   { id: 'LM-013', name: 'Custom longitudinal steel · scheduled length', category: 'Custom', unit: 'ft', stock: 0, price: null, reorder: 0 },
+  { id: 'SL-014', name: 'Concrete floor slab · allowance included', category: 'Custom', unit: 'cu yd', stock: 0, price: null, reorder: 0 },
 ];
 
 export function roofRise(building) { return building.width * (building.roof === 'arch' ? 0.24 : 0.22); }
@@ -83,11 +87,18 @@ export function buildingMetrics(building) {
   return { bays, frames: bays + 1, actualBay: building.length / bays, area: building.width * building.length, ridge: building.height + roofRise(building), fabricArea };
 }
 
+export function floorTakeoff(building) {
+  const floor = { ...defaultFloor, ...building.floor };
+  const area = floor.enabled ? building.width * building.length : 0;
+  const netVolume = area * floor.thickness / 12 / 27;
+  return { area, thicknessFeet: floor.thickness / 12, netVolume, orderVolume: netVolume * (1 + floor.wastePercent / 100) };
+}
+
 export function billOfMaterials(building, inventory = initialInventory) {
   const metrics = buildingMetrics(building);
   const takeoff = constructionTakeoff(building);
   const customFrames = takeoff.columnReduction > 0;
-  const quantities = [customFrames ? 0 : metrics.frames, takeoff.adapted ? 0 : metrics.bays * 10, metrics.fabricArea, metrics.frames * 2, metrics.frames * 2, Math.max(4, Math.ceil(metrics.bays / 3) * 2), building.endWalls && building.doorWidth > 0 ? 1 : 0, customFrames ? metrics.frames : 0, takeoff.concreteVolume, takeoff.adapted ? takeoff.cutVolume : 0, takeoff.adapted && building.construction.fillMaterial === 'stone' ? takeoff.orderedFillVolume : 0, takeoff.adapted && building.construction.fillMaterial === 'engineered-fill' ? takeoff.orderedFillVolume : 0, takeoff.adapted ? longitudinalMembers(building).reduce((sum, member) => sum + member.length, 0) : 0];
+  const quantities = [customFrames ? 0 : metrics.frames, takeoff.adapted ? 0 : metrics.bays * 10, metrics.fabricArea, metrics.frames * 2, metrics.frames * 2, Math.max(4, Math.ceil(metrics.bays / 3) * 2), building.endWalls && building.doorWidth > 0 ? 1 : 0, customFrames ? metrics.frames : 0, takeoff.concreteVolume, takeoff.adapted ? takeoff.cutVolume : 0, takeoff.adapted && building.construction.fillMaterial === 'stone' ? takeoff.orderedFillVolume : 0, takeoff.adapted && building.construction.fillMaterial === 'engineered-fill' ? takeoff.orderedFillVolume : 0, takeoff.adapted ? longitudinalMembers(building).reduce((sum, member) => sum + member.length, 0) : 0, floorTakeoff(building).orderVolume];
   return initialInventory.map((part, index) => {
     const current = inventory.find(item => item.id === part.id) || { ...part, price: null, stock: 0 };
     return { ...current, quantity: quantities[index], total: current.price == null ? null : quantities[index] * current.price };
@@ -105,6 +116,7 @@ export function siteElevationAt(building, fractionFromSouth) {
 
 export function designWarnings(building) {
   const warnings = [];
+  if (building.floor?.enabled) warnings.push(`Concrete floor: ${building.floor.thickness} in draft thickness, ${building.floor.wastePercent}% material allowance. Geometric quantity only; thickness adequacy, reinforcement, joints, vapor barrier, subbase, frost/heave and load design are unresolved. Slab excavation and subbase quantities are not included.`);
   if (building.construction.wallMode === 'concrete') {
     warnings.push('Wall volumes, covering reductions, and column lengths are geometric takeoffs, not a structural design. Footings, reinforcement, retaining capacity, drainage, waterproofing, connections, and steel member sizing remain uncalculated. Do not fabricate or construct before engineering release.');
     if (constructionTakeoff(building).fillVolume > 0 && building.construction.fillMaterial === 'unspecified') warnings.push('Fill is required by the floor/ground profile but no fill material is selected. Fill cost is excluded until you choose a material and unit price.');

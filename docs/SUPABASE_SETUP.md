@@ -4,7 +4,7 @@
 
 This repository now contains a Supabase backend option: Auth with optional authenticator MFA, management-created staff profiles, Postgres row-level security, an authenticated Edge Function for privileged operations, and transactional inventory imports. The frontend's production default is Supabase. Express/SQLite remains available for local development and automated tests only.
 
-**Deployment status for this workspace:** the DraftAI project `vheobwhpufrubdfantex` is linked; migrations `202610200001_workspace.sql` and `202610200002_inventory_operations.sql` are applied; `workspace-api` is deployed; email/password login is enabled and global public signup is disabled. The AWS frontend origin https://main.d1dq7mzpn9g8pz.amplifyapp.com is authorized. Hosted smoke tests verify authentication, inventory locations, customers, shipment movements, permissions, and privacy with temporary records removed afterward. Permanent administrator credentials remain private/operator-managed. The steps below remain the reference for a new installation.
+**Deployment status for this workspace:** the DraftAI project `vheobwhpufrubdfantex` is linked; migrations `202610200001_workspace.sql`, `202610200002_inventory_operations.sql`, and `202610210001_yard_purchasing.sql` are applied; the matching `workspace-api` is deployed; email/password login is enabled and global public signup is disabled. The AWS frontend origin https://main.d1dq7mzpn9g8pz.amplifyapp.com is authorized. Hosted smoke checks verify staging, shortages, purchasing/receiving roles, partial counted receipts/rejects, replay protection, special-order allocation, concrete-floor persistence, authentication, and privacy with temporary records removed. Permanent administrator credentials remain private/operator-managed. The steps below remain the reference for a new installation.
 
 This guide assumes the new Supabase project is empty, as confirmed by the project owner. Do not run the initial migration against another application's database. Review the SQL before applying it. The migration deliberately does not seed illustrative inventory: real inventory starts empty and can be imported.
 
@@ -26,6 +26,8 @@ For a new, empty project, open Supabase **SQL Editor** and run the complete migr
 [supabase/migrations/202610200001_workspace.sql](../supabase/migrations/202610200001_workspace.sql)
 
 [supabase/migrations/202610200002_inventory_operations.sql](../supabase/migrations/202610200002_inventory_operations.sql)
+
+[supabase/migrations/202610210001_yard_purchasing.sql](../supabase/migrations/202610210001_yard_purchasing.sql)
 
 Run it once. It creates tables, policies, and functions inside a transaction; it is not a destructive reset or an idempotent script. On an error the transaction must roll back; fix the cause instead of dropping existing data.
 
