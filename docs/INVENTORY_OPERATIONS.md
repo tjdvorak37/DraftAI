@@ -1,6 +1,6 @@
 # Locations, Yard Staging, Purchasing, And Shipping
 
-**Release status:** the `202610210001_yard_purchasing.sql` migration and matching authenticated function are deployed to DraftAI and passed hosted smoke checks with temporary records removed. This release includes the matching yard-tag, Ordering, and Receiving frontend; verify Amplify has built this revision before expecting the new navigation.
+**Release status:** the `202610210001_yard_purchasing.sql` migration and matching authenticated function are deployed to DraftAI and passed hosted smoke checks with temporary records removed. The matching frontend is merged to `main`, but the Amplify site still served its previous JavaScript bundle at last check. The hosted yard/Ordering/Receiving screens are unavailable until Amplify publishes the new build.
 
 ## Inventory Locations
 
