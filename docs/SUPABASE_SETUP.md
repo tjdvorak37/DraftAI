@@ -72,15 +72,7 @@ Required custom secret:
 | --- | --- |
 | `ALLOWED_ORIGINS` | Exact frontend origins separated by commas, such as `https://main.YOUR_APP.amplifyapp.com,http://localhost:5173`. No paths, trailing slashes, or wildcards. |
 
-Optional AI secrets:
-
-| Name | Purpose |
-| --- | --- |
-| `WORKSPACE_ENCRYPTION_KEY` | Stable 64-character hexadecimal AES key, required to save an OpenAI key in Admin Center. Back it up securely; changing/losing it makes saved keys unreadable. |
-| `OPENAI_API_KEY` | Optional server-side provider credential instead of storing one through Admin Center. |
-| `OPENAI_MODEL` | Optional model default; otherwise `gpt-4o-mini`. |
-
-Generate an encryption key locally using a secret-management tool or `openssl rand -hex 32` and place it directly into Supabase secrets, not chat. AI is optional: local supported design commands work without any provider key.
+No AI-provider secrets are required or used. **Admin → Integrations** is intentionally vendor-neutral and under review. The design assistant uses local deterministic commands; prompts and building data are not sent to an AI provider. Legacy provider settings, if present, are inactive and retained, not automatically deleted.
 
 Deploy:
 
@@ -120,7 +112,7 @@ Amplify hosts static frontend assets. Supabase hosts Auth, database, and functio
 6. Sign in as a viewer/technician. Costs and other people's contact information must not be readable. Attempt an unauthorized update and confirm it fails server-side.
 7. Create a support ticket as one staff member. Other ordinary staff must not see it; administrator/technician assignment and replies must work.
 8. Enroll TOTP on a test account, sign out, and confirm that password-only sign-in cannot access functions or database data. Check disabled-account access with an already-issued token as well as a new login.
-9. If using OpenAI, test it with an approved non-confidential design. Live provider billing/network access is not covered by local tests.
+9. Confirm the Admin Integrations page says **Under review**, the design assistant says **LOCAL COMMANDS**, and no provider credentials are configured for this application. Legacy external-AI endpoints should return HTTP 410.
 10. Set up database backups/restore procedures, secret backups, auth recovery, monitoring, incident response, and provider spending/rate controls before production company data. Verify the actual plan's backup/retention features; a free project's dashboard does not imply a backup policy.
 
 Backend deployment and temporary-record hosted checks have been performed for the linked DraftAI project. Full acceptance through the actual AWS frontend URL remains pending until that URL exists and is added to the function's allowed origins. Do not label the installation production-ready solely because a frontend build succeeds. Structural engineering/fabrication limitations remain documented separately.

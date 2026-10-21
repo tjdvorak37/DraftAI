@@ -183,7 +183,6 @@ function WorkspaceApp({ account, onSignedOut }) {
   const [modal, setModal] = useState(null);
   const [user, setUser] = useState(account);
   const [setupRequired, setSetupRequired] = useState(false);
-  const [aiConnected, setAiConnected] = useState(false);
   const [inventory, setInventory] = useState([]);
   const [inventoryLocation,setInventoryLocation]=useState(account.locationId||'MAIN');
   const [locations,setLocations]=useState([]);
@@ -219,9 +218,9 @@ function WorkspaceApp({ account, onSignedOut }) {
   async function reloadInventory(){setInventory(await api(`/inventory?location=${encodeURIComponent(inventoryLocation)}`));}
   async function reloadStockWarnings(){if(supplyReadRoles.includes(user.role))setStockWarnings(await api(`/ordering-board?location=${encodeURIComponent(inventoryLocation)}`));}
   async function refreshStock(){await Promise.all([reloadInventory(),reloadStockWarnings()]);}
-  function workspaceChanged(settings) { setWorkspace(current => ({ ...current, ...settings })); if ('aiConnected' in settings) setAiConnected(settings.aiConnected); }
+  function workspaceChanged(settings) { setWorkspace(current => ({ ...current, ...settings })); }
 
-  useEffect(() => { api('/auth').then(data => { if (!data.user) onSignedOut(); else { setUser(data.user); setAiConnected(data.aiConnected); } }).catch(() => onSignedOut()); }, []);
+  useEffect(() => { api('/auth').then(data => { if (!data.user) onSignedOut(); else setUser(data.user); }).catch(() => onSignedOut()); }, []);
   useEffect(() => { api('/workspace').then(workspaceChanged).catch(() => {}); }, []);
   useEffect(() => { try { localStorage.setItem(`accusteel-draft:${account.id}:${account.email}`, JSON.stringify(building)); } catch { notify('Local storage is unavailable. Export your project to keep a copy.'); } }, [building]);
   useEffect(() => {
@@ -260,8 +259,7 @@ function WorkspaceApp({ account, onSignedOut }) {
     try {
       let result;
       const context = selected?.toLowerCase().includes('door') ? 'door' : selected?.toLowerCase().includes('window') ? 'window' : commandContext;
-      if (aiConnected && user) result = await api('/ai/design', { prompt: text, building, context });
-      else {const candidate=parseDesignCommand(text,building,context);result={building:candidate,explanation:JSON.stringify(candidate.floor)!==JSON.stringify(building.floor)?candidate.floor.enabled?`Concrete floor proposed at ${candidate.floor.thickness} in thickness with ${candidate.floor.wastePercent}% allowance. Confirm these draft inputs before applying; reinforcement and structural adequacy are not calculated.`:'Concrete floor removal proposed. Review before applying.':'I’ve prepared a design update. Review the changes below.'};}
+      const candidate=parseDesignCommand(text,building,context);result={building:candidate,explanation:JSON.stringify(candidate.floor)!==JSON.stringify(building.floor)?candidate.floor.enabled?`Concrete floor proposed at ${candidate.floor.thickness} in thickness with ${candidate.floor.wastePercent}% allowance. Confirm these draft inputs before applying; reinforcement and structural adequacy are not calculated.`:'Concrete floor removal proposed. Review before applying.':'I’ve prepared a design update. Review the changes below.'};
       if (JSON.stringify(currentModelRef.current) !== JSON.stringify(building)) throw new Error('The building changed while this request was being prepared. Please resend the request against the current design.');
       const changes = Object.keys(result.building).filter(key => JSON.stringify(result.building[key]) !== JSON.stringify(building[key]));
       if (/\bdoor\b/i.test(text)) setCommandContext('door');
@@ -319,7 +317,7 @@ function WorkspaceApp({ account, onSignedOut }) {
         </main>
 
         <aside className="assistant-panel">
-          <div className="panel-heading"><span><Sparkles size={16} className="accent-icon" /> Design assistant</span><span className="assistant-status"><i />{aiConnected && user ? 'AI CONNECTED' : 'LOCAL COMMANDS'}</span></div>
+          <div className="panel-heading"><span><Sparkles size={16} className="accent-icon" /> Design assistant</span><span className="assistant-status"><i />LOCAL COMMANDS</span></div>
           <div className="conversation" ref={conversationRef}>
             <div className="assistant-welcome"><div className="assistant-emblem"><Sparkles size={23} strokeWidth={1.4} /></div><span className="eyebrow">A LITTLE VISION. A LOT OF POSSIBILITY.</span><h2>Let’s build<br />something great.</h2><p>Your {building.width} × {building.length} ft building is taking shape.<br />What would you like to change?</p></div>
             <div className="conversation-divider"><span>YOUR DESIGN, IN YOUR WORDS</span></div>
@@ -329,7 +327,7 @@ function WorkspaceApp({ account, onSignedOut }) {
             {aiBusy && <div className="thinking"><LoaderCircle size={14} className="spin" /> Preparing your design…</div>}
             {proposal && <div className="proposal"><strong><Settings2 size={14} /> Proposed changes</strong>{proposal.changes.map(key => <div className={['window', 'site', 'construction','floor'].includes(key) ? 'nested-proposal-row' : ''} key={key}><span>{fieldNames[key]}</span><span>{describeDesignValue(key, building[key])} <ArrowRight size={11} /> <b>{describeDesignValue(key, proposal.building[key])}</b></span></div>)}{designWarnings(proposal.building).map(warning => <p className="proposal-warning" key={warning}>{warning}</p>)}<button className="button primary full" onClick={applyProposal}><Check size={14} /> Apply to building</button><button className="text-button" onClick={() => { setProposal(null); setMessages(current => [...current, { role: 'assistant', content: 'Changes discarded. Your building is unchanged.' }]); }}>Discard changes</button></div>}
           </div>
-          <div className="assistant-composer"><form onSubmit={event => { event.preventDefault(); sendCommand(); }}><textarea aria-label="Describe a design change" placeholder={canDesign ? 'Describe your next design change…' : 'Your role has read-only design access'} value={prompt} maxLength={2000} rows={2} disabled={!canDesign} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendCommand(); } }} /><div><span><Sparkles size={12} />{aiConnected && user ? 'AI-assisted design' : 'Local dimension commands'}</span><button aria-label="Send design request" title="Send design request" disabled={!prompt.trim() || aiBusy || !canDesign}><ArrowRight size={17} /></button></div></form><p><ShieldCheck size={11} /> Engineer review required before construction.</p></div>
+          <div className="assistant-composer"><form onSubmit={event => { event.preventDefault(); sendCommand(); }}><textarea aria-label="Describe a design change" placeholder={canDesign ? 'Describe your next design change…' : 'Your role has read-only design access'} value={prompt} maxLength={2000} rows={2} disabled={!canDesign} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendCommand(); } }} /><div><span><Sparkles size={12} />Local dimension commands</span><button aria-label="Send design request" title="Send design request" disabled={!prompt.trim() || aiBusy || !canDesign}><ArrowRight size={17} /></button></div></form><p><ShieldCheck size={11} /> Engineer review required before construction.</p></div>
           <div className="assistant-bottom"><span className="brand-wordmark">ACCU-STEEL</span><span>BUILT TO ENDURE.</span></div>
         </aside>
       </div>

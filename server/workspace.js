@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { roles, projectRoles, supportRoles, projectStatuses, ticketStatuses, ticketPriorities } from '../shared/access.js';
 
-export function registerWorkspace({ app, db, allow, audit, publicUser, seal, unseal }) {
+export function registerWorkspace({ app, db, allow, audit, publicUser }) {
   const addColumn = (table, column, sql) => {
     if (!db.prepare(`PRAGMA table_info(${table})`).all().some(item => item.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${sql}`);
   };
@@ -13,12 +13,10 @@ export function registerWorkspace({ app, db, allow, audit, publicUser, seal, uns
     CREATE TABLE IF NOT EXISTS ticket_messages (id INTEGER PRIMARY KEY, ticket_id INTEGER NOT NULL, author INTEGER NOT NULL, body TEXT NOT NULL, created TEXT NOT NULL);`);
   const setting = (id, fallback = '') => db.prepare('SELECT value FROM settings WHERE id=?').get(id)?.value ?? fallback;
   const saveSetting = (id, value) => db.prepare('INSERT INTO settings VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value').run(id, value);
-  const aiConfig = () => ({ key: setting('openai_key') ? unseal(setting('openai_key')) : process.env.OPENAI_API_KEY || '', model: setting('openai_model', process.env.OPENAI_MODEL || 'gpt-4o-mini'), enabled: setting('openai_enabled', 'true') === 'true' });
-  const workspaceSettings = () => ({ name: setting('workspace_name', 'Accu-Steel workspace'), supportEmail: setting('support_email'), aiConnected: Boolean(aiConfig().key && aiConfig().enabled) });
+  const workspaceSettings = () => ({ name: setting('workspace_name', 'Accu-Steel workspace'), supportEmail: setting('support_email') });
   app.get('/api/workspace', allow(), (req, res) => res.json(workspaceSettings()));
   app.get('/api/admin', allow('admin'), (req, res) => {
-    const config = aiConfig();
-    res.json({ ...workspaceSettings(), integrations: { openai: { configured: Boolean(config.key), enabled: config.enabled, model: config.model, source: setting('openai_key') ? 'workspace' : process.env.OPENAI_API_KEY ? 'environment' : 'none' } }, counts: { users: db.prepare('SELECT COUNT(*) AS total FROM users WHERE disabled=0').get().total, projects: db.prepare('SELECT COUNT(*) AS total FROM projects').get().total, tickets: db.prepare("SELECT COUNT(*) AS total FROM tickets WHERE status NOT IN ('Resolved','Closed')").get().total }, audit: db.prepare('SELECT audit.id, audit.action, audit.detail, audit.created, users.name AS actor_name FROM audit LEFT JOIN users ON users.id=audit.actor ORDER BY audit.id DESC LIMIT 60').all() });
+    res.json({ ...workspaceSettings(), integrations: { providerSelection: 'under-review' }, counts: { users: db.prepare('SELECT COUNT(*) AS total FROM users WHERE disabled=0').get().total, projects: db.prepare('SELECT COUNT(*) AS total FROM projects').get().total, tickets: db.prepare("SELECT COUNT(*) AS total FROM tickets WHERE status NOT IN ('Resolved','Closed')").get().total }, audit: db.prepare('SELECT audit.id, audit.action, audit.detail, audit.created, users.name AS actor_name FROM audit LEFT JOIN users ON users.id=audit.actor ORDER BY audit.id DESC LIMIT 60').all() });
   });
   app.post('/api/admin/settings', allow('admin'), (req, res) => {
     const parsed = z.object({ name: z.string().trim().min(2).max(80), supportEmail: z.union([z.email(), z.literal('')]) }).safeParse(req.body);
@@ -28,27 +26,8 @@ export function registerWorkspace({ app, db, allow, audit, publicUser, seal, uns
     audit(req, 'settings.update', parsed.data);
     res.json(workspaceSettings());
   });
-  app.post('/api/admin/integrations/openai', allow('admin'), (req, res) => {
-    const parsed = z.object({ model: z.string().regex(/^[a-zA-Z0-9._:-]{1,100}$/), enabled: z.boolean(), apiKey: z.string().trim().min(10).max(500).optional(), removeKey: z.boolean().optional() }).safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'Enter a valid model name and API key, or leave the key unchanged.' });
-    const data = parsed.data;
-    if (data.apiKey) saveSetting('openai_key', seal(data.apiKey));
-    if (data.removeKey) db.prepare("DELETE FROM settings WHERE id='openai_key'").run();
-    saveSetting('openai_model', data.model);
-    saveSetting('openai_enabled', String(data.enabled));
-    audit(req, 'integration.openai.update', { model: data.model, enabled: data.enabled, keyChanged: Boolean(data.apiKey || data.removeKey) });
-    res.json({ ok: true, aiConnected: workspaceSettings().aiConnected });
-  });
-  app.post('/api/admin/integrations/openai/test', allow('admin'), async (req, res) => {
-    const config = aiConfig();
-    if (!config.key || !config.enabled) return res.status(400).json({ error: 'Save an API key and enable the integration first.' });
-    try {
-      const response = await fetch(`https://api.openai.com/v1/models/${encodeURIComponent(config.model)}`, { signal: AbortSignal.timeout(15000), headers: { Authorization: `Bearer ${config.key}` } });
-      audit(req, 'integration.openai.test', { success: response.ok, status: response.status });
-      if (!response.ok) return res.status(502).json({ error: `Provider rejected the connection or model (HTTP ${response.status}).` });
-      res.json({ ok: true, message: `Credentials accepted. Model ${config.model} is accessible. A design request may still require billing access.` });
-    } catch { res.status(502).json({ error: 'Provider connection timed out or is unavailable.' }); }
-  });
+  app.post('/api/admin/integrations/openai', allow('admin'), (req, res) => res.status(410).json({ error: 'Provider connections are paused while AI and engineering workflows are under review. Existing credentials are retained but inactive.' }));
+  app.post('/api/admin/integrations/openai/test', allow('admin'), (req, res) => res.status(410).json({ error: 'Provider connections are paused while AI and engineering workflows are under review.' }));
   app.post('/api/users/:id/access', allow('admin'), (req, res) => {
     const parsed = z.object({ role: z.enum(roles), disabled: z.boolean() }).safeParse(req.body);
     const id = Number(req.params.id);
@@ -122,5 +101,5 @@ export function registerWorkspace({ app, db, allow, audit, publicUser, seal, uns
     audit(req, 'ticket.triage', { id: ticket.id, ...data });
     res.json({ ok: true });
   });
-  return { aiConfig, workspaceSettings };
+  return { workspaceSettings };
 }

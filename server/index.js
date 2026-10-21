@@ -9,7 +9,7 @@ import bcrypt from 'bcryptjs';
 import * as OTPAuth from 'otpauth';
 import QRCode from 'qrcode';
 import { z } from 'zod';
-import { buildingSchema, initialInventory, parseDesignCommand } from '../shared/model.js';
+import { buildingSchema, initialInventory } from '../shared/model.js';
 import { roles, designRoles, costRoles } from '../shared/access.js';
 import { registerWorkspace } from './workspace.js';
 import { credentialsSchema, profileSchema } from './accounts.js';
@@ -72,10 +72,10 @@ export function createApp({ databasePath = process.env.DATABASE_PATH || 'data/st
   };
   const credentials = credentialsSchema;
   const totpFor = (secret, user) => new OTPAuth.TOTP({ issuer: 'Accu-Steel Draft Studio', label: user.email, algorithm: 'SHA1', digits: 6, period: 30, secret: OTPAuth.Secret.fromBase32(secret) });
-  const { aiConfig, workspaceSettings } = registerWorkspace({ app, db, allow, audit, publicUser, seal, unseal });
+  registerWorkspace({ app, db, allow, audit, publicUser });
   const {inventoryAt,saveItem,activeLocation}=registerOperations({app,db,allow,audit});
   registerInventoryImport({ app, db, allow, audit,inventoryAt,saveItem });
-  app.get('/api/auth', (req, res) => res.json({ user: req.user ? publicUser(req.user) : null, setupRequired: !db.prepare('SELECT id FROM users LIMIT 1').get(), aiConnected: Boolean(req.user && workspaceSettings().aiConnected) }));
+  app.get('/api/auth', (req, res) => res.json({ user: req.user ? publicUser(req.user) : null, setupRequired: !db.prepare('SELECT id FROM users LIMIT 1').get() }));
   app.post('/api/auth/register', authLimit, (req, res) => res.status(403).json({ error: 'Public registration is disabled. Management must provision your account.' }));
   app.post('/api/auth/login', authLimit, async (req, res) => {
     const user = typeof req.body.email === 'string' ? db.prepare('SELECT * FROM users WHERE email=?').get(req.body.email.toLowerCase()) : null;
@@ -164,31 +164,7 @@ export function createApp({ databasePath = process.env.DATABASE_PATH || 'data/st
     audit(req, 'project.save', { id: projectId });
     res.json({ id: projectId, updated });
   });
-  app.post('/api/ai/design', rateLimit({ windowMs: 60 * 1000, limit: 12 }), allow(...designRoles), async (req, res) => {
-    const config = aiConfig();
-    const parsed = buildingSchema.safeParse(req.body.building);
-    if (!parsed.success || typeof req.body.prompt !== 'string' || req.body.prompt.length > 2000) return res.status(400).json({ error: 'Invalid design request.' });
-    let expected;
-    try { expected = parseDesignCommand(req.body.prompt, parsed.data, ['door', 'window', 'building'].includes(req.body.context) ? req.body.context : null); }
-    catch (error) { return res.status(422).json({ error: error.issues?.[0]?.message || error.message, needsClarification: true }); }
-    if (!config.key || !config.enabled) return res.status(503).json({ error: 'AI service is not configured. Local dimension commands are still available.' });
-    try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST', signal: AbortSignal.timeout(30000),
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.key}` },
-        body: JSON.stringify({ model: config.model, temperature: 0.1, response_format: { type: 'json_object' }, messages: [
-          { role: 'system', content: 'Explain a validated preliminary building change. Return JSON {building, explanation}. Copy the supplied validatedBuilding exactly, including nested window and site fields. Do not change any values. Explain the differences in under 50 words. Never claim safety, code compliance, structural adequacy, calculated foundations/stone/steel sizing, or certification. Terrain and windows are conceptual references only and are not included in engineered quantities.' },
-          { role: 'user', content: JSON.stringify({ currentBuilding: parsed.data, request: req.body.prompt, validatedBuilding: expected }) },
-        ] }),
-      });
-      if (!response.ok) throw new Error('The AI service could not complete this request.');
-      const data = await response.json();
-      const result = JSON.parse(data.choices[0].message.content);
-      const building = buildingSchema.parse(result.building);
-      if (JSON.stringify(building) !== JSON.stringify(expected)) throw new Error('Provider changed validated operations.');
-      res.json({ building, explanation: String(result.explanation || 'Design updated. Review the dimensions before saving.').slice(0, 600) });
-    } catch { res.status(502).json({ error: 'AI request failed or returned an unsupported design. Your building was not changed.' }); }
-  });
+  app.post('/api/ai/design', allow(...designRoles), (req, res) => res.status(410).json({ error: 'External AI design requests are paused while provider and engineering workflows are under review. Supported dimensional commands run locally.' }));
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static(resolve('dist')));
     app.get('/{*path}', (req, res, next) => req.path.startsWith('/api/') ? next() : res.sendFile(resolve('dist/index.html')));

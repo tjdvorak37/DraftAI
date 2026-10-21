@@ -75,6 +75,14 @@ try {
   const authenticated = await call(admin.token, '/auth');
   assert.equal(authenticated.status, 200, JSON.stringify(authenticated.data));
   assert.equal(authenticated.data.user.role, 'admin');
+  assert.equal(authenticated.data.aiConnected, undefined);
+  const adminSettings=await call(admin.token,'/admin');
+  assert.equal(adminSettings.status,200,JSON.stringify(adminSettings.data));
+  assert.equal(adminSettings.data.integrations.providerSelection,'under-review');
+  assert.equal(adminSettings.data.integrations.openai,undefined);
+  assert.equal((await call(admin.token,'/ai/design',{prompt:'Make it 80 ft wide',building:defaultBuilding})).status,410);
+  assert.equal((await call(admin.token,'/admin/integrations/openai',{model:'legacy',enabled:true})).status,410);
+  assert.equal((await call(admin.token,'/admin/integrations/openai/test',{})).status,410);
   const item = { id: partId, name: 'Temporary deployment check', category: 'Temporary smoke test', unit: 'ea', stock: 4, price: 12.5, reorder: 3, location: '', supplier: '' };
   const saved = await call(admin.token, '/inventory', item);
   assert.equal(saved.status, 200, JSON.stringify(saved.data));

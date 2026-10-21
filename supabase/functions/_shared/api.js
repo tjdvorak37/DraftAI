@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { buildingSchema, parseDesignCommand } from '../../../shared/model.js';
+import { buildingSchema } from '../../../shared/model.js';
 import { inventoryItemSchema, inventoryFields, previewInventoryImport } from '../../../shared/inventory.js';
 import { roles, designRoles, costRoles, supportRoles, projectStatuses, ticketStatuses, ticketPriorities } from '../../../shared/access.js';
 import { routeOperations } from './operations.js';
@@ -19,20 +19,6 @@ async function allRows(client, table, columns = '*') {
     if (batch.length < 1000) return rows;
   }
 }
-async function cryptKey(secret) {
-  if (!/^[a-f0-9]{64}$/i.test(secret || '')) throw failure('Configure WORKSPACE_ENCRYPTION_KEY in Supabase function secrets before storing an API key.');
-  return crypto.subtle.importKey('raw', new Uint8Array(secret.match(/../g).map(byte => parseInt(byte, 16))), 'AES-GCM', false, ['encrypt', 'decrypt']);
-}
-async function encrypt(value, secret) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await cryptKey(secret), new TextEncoder().encode(value)));
-  return btoa(String.fromCharCode(...iv, ...encrypted));
-}
-async function decrypt(value, secret) {
-  const bytes = Uint8Array.from(atob(value), character => character.charCodeAt(0));
-  return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.subarray(0, 12) }, await cryptKey(secret), bytes.subarray(12)));
-}
-
 export function createWorkspaceHandler({ createClient, env, fetchProvider = fetch }) {
   return async request => {
     const allowedOrigins = (env('ALLOWED_ORIGINS') || '').split(',').map(value => value.trim()).filter(Boolean);
@@ -74,17 +60,13 @@ export function createWorkspaceHandler({ createClient, env, fetchProvider = fetc
       const permit = allowed => { if (!allowed.includes(profile.role)) throw failure('Your role does not permit this action.', 403); };
       const audit = async (action, detail) => checked(await service.from('audit').insert({ actor: identity.id, action, detail }));
       const setting = async id => checked(await service.from('workspace_settings').select('value').eq('id', id).maybeSingle())?.value;
-      const aiSettings = async () => {
-        const value = await setting('openai') || {};
-        return { ...value, model: value.model || env('OPENAI_MODEL') || 'gpt-4o-mini', enabled: value.enabled !== false, key: value.encryptedKey ? await decrypt(value.encryptedKey, env('WORKSPACE_ENCRYPTION_KEY')) : env('OPENAI_API_KEY') || '' };
-      };
-      const workspace = async () => ({ ...(await setting('general') || { name: 'Accu-Steel workspace', supportEmail: '' }), aiConnected: Boolean((await aiSettings()).key && (await aiSettings()).enabled) });
+      const workspace = async () => ({ ...(await setting('general') || { name: 'Accu-Steel workspace', supportEmail: '' }) });
       const inventory = async (location=profile.location_id||'MAIN',flat=false) => checked(await user.rpc('inventory_listing',{p_location:location,p_flat:flat}));
       const directory = async () => checked(await service.from('profiles').select('id,name,role').eq('disabled', false));
       const operations=await routeOperations({path,method,body,service,user,identity,profile,permit,checked,audit,failure});
       if(operations)return respond(operations.data);
       const supply=await routeSupply({path,method,body,service,user,profile,permit,checked,failure,query:incomingPath.searchParams});if(supply)return respond(supply.data);
-      if (path === '/auth' && method === 'GET') return respond({ user: publicProfile(profile, identity.factors), aiConnected: (await workspace()).aiConnected, setupRequired: false });
+      if (path === '/auth' && method === 'GET') return respond({ user: publicProfile(profile, identity.factors), setupRequired: false });
       if (path === '/auth/register') throw failure('Public registration is disabled. Management provisions all accounts.', 403);
       if (path === '/workspace' && method === 'GET') return respond(await workspace());
       if (path === '/inventory' && method === 'GET') return respond(await inventory(incomingPath.searchParams.get('location')||profile.location_id||'MAIN',incomingPath.searchParams.get('flat')==='true'));
@@ -198,40 +180,24 @@ export function createWorkspaceHandler({ createClient, env, fetchProvider = fetc
         }
       }
       if (path === '/admin' && method === 'GET') {
-        permit(['admin']); const config = await aiSettings(); const general = await workspace();
+        permit(['admin']); const general = await workspace();
         const count = async table => { const result = await service.from(table).select('id', { count: 'exact', head: true }); if (result.error) throw failure(result.error.message); return result.count; };
         const records = checked(await service.from('audit').select('*').order('id', { ascending: false }).limit(60));
         const people = new Map((await directory()).map(person => [person.id, person.name]));
-        return respond({ ...general, integrations: { openai: { configured: Boolean(config.key), enabled: config.enabled, model: config.model, source: config.encryptedKey ? 'workspace' : config.key ? 'environment' : 'none' } }, counts: { users: (await directory()).length, projects: await count('projects'), tickets: checked(await service.from('tickets').select('id').not('status','in','(Resolved,Closed)')).length }, audit: records.map(record => ({ ...record, actor_name: people.get(record.actor) || 'System', detail: JSON.stringify(record.detail) })) });
+        return respond({ ...general, integrations: { providerSelection: 'under-review' }, counts: { users: (await directory()).length, projects: await count('projects'), tickets: checked(await service.from('tickets').select('id').not('status','in','(Resolved,Closed)')).length }, audit: records.map(record => ({ ...record, actor_name: people.get(record.actor) || 'System', detail: JSON.stringify(record.detail) })) });
       }
       if (path === '/admin/settings' && method === 'POST') {
         permit(['admin']); const data = z.object({ name: z.string().trim().min(2).max(80), supportEmail: z.union([z.email(), z.literal('')]) }).parse(body);
         checked(await service.from('workspace_settings').upsert({ id: 'general', value: data })); await audit('settings.update', data); return respond(await workspace());
       }
       if (path === '/admin/integrations/openai' && method === 'POST') {
-        permit(['admin']); const data = z.object({ model: z.string().regex(/^[a-zA-Z0-9._:-]{1,100}$/), enabled: z.boolean(), apiKey: z.string().min(10).max(500).optional(), removeKey: z.boolean().optional() }).parse(body);
-        const previous = await setting('openai') || {};
-        const value = { ...previous, model: data.model, enabled: data.enabled };
-        if (data.apiKey) value.encryptedKey = await encrypt(data.apiKey, env('WORKSPACE_ENCRYPTION_KEY'));
-        if (data.removeKey) delete value.encryptedKey;
-        checked(await service.from('workspace_settings').upsert({ id: 'openai', value })); await audit('integration.openai.update', { model: data.model, enabled: data.enabled, keyChanged: Boolean(data.apiKey || data.removeKey) }); return respond({ ok: true, aiConnected: (await workspace()).aiConnected });
+        permit(['admin']); throw failure('Provider connections are paused while AI and engineering workflows are under review. Existing credentials are retained but inactive.', 410);
       }
       if (path === '/admin/integrations/openai/test' && method === 'POST') {
-        permit(['admin']); const config = await aiSettings();
-        if (!config.key || !config.enabled) throw failure('Configure and enable OpenAI first.');
-        const response = await fetchProvider(`https://api.openai.com/v1/models/${encodeURIComponent(config.model)}`, { signal: AbortSignal.timeout(15000), headers: { Authorization: `Bearer ${config.key}` } });
-        if (!response.ok) throw failure(`Provider rejected credentials/model (HTTP ${response.status}).`, 502);
-        await audit('integration.openai.test', { success: true }); return respond({ ok: true, message: 'Credentials and model accepted. Billing access is still required for requests.' });
+        permit(['admin']); throw failure('Provider connections are paused while AI and engineering workflows are under review.', 410);
       }
       if (path === '/ai/design' && method === 'POST') {
-        permit(designRoles); const building = buildingSchema.parse(body.building); const prompt = z.string().min(1).max(2000).parse(body.prompt);
-        let candidate;
-        try { candidate = parseDesignCommand(prompt, building, ['door','window','building'].includes(body.context) ? body.context : null); } catch (error) { throw failure(error.issues?.[0]?.message || error.message, 422, { needsClarification: true }); }
-        const config = await aiSettings(); if (!config.key || !config.enabled) throw failure('AI is not configured.', 503);
-        const response = await fetchProvider('https://api.openai.com/v1/chat/completions', { method: 'POST', signal: AbortSignal.timeout(30000), headers: { Authorization: `Bearer ${config.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: config.model, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: 'Return JSON {explanation}. Explain the supplied validated dimensional change in under 50 words. Do not claim safety, structural adequacy, certification, or engineered foundations. Do not introduce unsupported changes.' }, { role: 'user', content: JSON.stringify({ current: building, candidate, prompt }) }] }) });
-        if (!response.ok) throw failure('AI provider request failed. Design unchanged.', 502);
-        const result = await response.json(); const explanation = JSON.parse(result.choices[0].message.content).explanation;
-        return respond({ building: candidate, explanation: String(explanation).slice(0, 600) });
+        permit(designRoles); throw failure('External AI design requests are paused while provider and engineering workflows are under review. Supported dimensional commands run locally.', 410);
       }
       throw failure('Endpoint not found.', 404);
     } catch (error) {

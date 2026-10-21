@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../server/index.js';
 import { provisionInitialAdmin } from '../server/accounts.js';
-import { defaultBuilding } from '../shared/model.js';
+import { defaultBuilding, parseDesignCommand } from '../shared/model.js';
 
 test('admin configuration, management projects, and private staff tickets enforce access', async () => {
   const { app, db } = createApp({ databasePath: ':memory:' });
@@ -21,16 +21,17 @@ test('admin configuration, management projects, and private staff tickets enforc
     const technician = (await request('/auth/login', { email: 'technician@test.com', password: 'long-staff-password' })).cookie;
     const viewer = (await request('/auth/login', { email: 'viewer@test.com', password: 'long-staff-password' })).cookie;
     assert.equal((await request('/admin', undefined, manager)).status, 403);
-    const ambiguous = await request('/ai/design', { building: defaultBuilding, prompt: 'Raise the building height 2 ft and move the window 20 feet from the southeast corner' }, manager);
-    assert.equal(ambiguous.status, 422);
-    assert.equal(ambiguous.data.needsClarification, true);
+    assert.throws(() => parseDesignCommand('Raise the building height 2 ft and move the window 20 feet from the southeast corner', defaultBuilding), /Which wall/);
     assert.equal((await request('/admin/settings', { name: 'Accu-Steel Operations', supportEmail: 'help@test.com' }, admin)).status, 200);
     assert.equal((await request('/workspace', undefined, admin)).data.name, 'Accu-Steel Operations');
-    assert.equal((await request('/admin/integrations/openai', { model: 'gpt-4o-mini', enabled: false, apiKey: 'test-only-not-a-provider-key' }, admin)).status, 200);
+    db.prepare("INSERT INTO settings (id,value) VALUES ('openai_key','legacy-encrypted-value')").run();
+    assert.equal((await request('/admin/integrations/openai', { model: 'gpt-4o-mini', enabled: true, apiKey: 'test-only-not-a-provider-key' }, admin)).status, 410);
+    assert.equal((await request('/admin/integrations/openai/test', {}, admin)).status, 410);
+    assert.equal((await request('/ai/design', { building: defaultBuilding, prompt: 'Make it 80 ft wide' }, manager)).status, 410);
     const settings = await request('/admin', undefined, admin);
-    assert.equal(settings.data.integrations.openai.configured, true);
-    assert.ok(!JSON.stringify(settings.data).includes('test-only-not-a-provider-key'));
-    assert.ok(!db.prepare("SELECT value FROM settings WHERE id='openai_key'").get().value.includes('test-only'));
+    assert.equal(settings.data.integrations.providerSelection, 'under-review');
+    assert.ok(!JSON.stringify(settings.data).includes('legacy-encrypted-value'));
+    assert.equal(db.prepare("SELECT value FROM settings WHERE id='openai_key'").get().value, 'legacy-encrypted-value');
     const project = (await request('/projects', { building: defaultBuilding }, manager)).data;
     assert.ok(project.id);
     const metadata = { client: 'Iowa Farm', location: 'Audubon, IA', status: 'Review', owner: 2, due_date: '2026-12-01', notes: 'Confirm site loads.', revision: 1 };

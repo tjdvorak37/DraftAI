@@ -40,9 +40,9 @@ export async function supabaseApi(path, body) {
   }
   if (path === '/auth') {
     const { session } = checked(await sdk.auth.getSession());
-    if (!session) return { user: null, aiConnected: false, setupRequired: false };
+    if (!session) return { user: null, setupRequired: false };
     const assurance = checked(await sdk.auth.mfa.getAuthenticatorAssuranceLevel());
-    if (assurance.nextLevel === 'aal2' && assurance.currentLevel !== 'aal2') return { user: null, aiConnected: false, setupRequired: false };
+    if (assurance.nextLevel === 'aal2' && assurance.currentLevel !== 'aal2') return { user: null, setupRequired: false };
     return invoke('/auth');
   }
   if (path === '/auth/2fa/setup') {
