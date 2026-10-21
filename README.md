@@ -122,7 +122,7 @@ npx playwright install --with-deps chromium
 npm run test:e2e
 ```
 
-All 33 automated tests and 10 browser workflows pass, along with production build, Deno validation, and a zero-finding production dependency audit. Coverage includes dimensional construction takeoffs, slab/component editing, imports, authentication, locations, customer privacy, reservations/staging/dispatch/receipts, purchasing/allocation, and Supabase policies/MFA/authorization. Browser tests use an isolated in-memory database and ports 3002/5174, including real slab selection, yard-tag PDF/print visibility, counted receiving, desktop/mobile layouts, and management/authenticator workflows. The deployed backend also passed hosted yard/supply/floor smoke checks with temporary fixtures removed. Software rendering can make the full browser suite take several minutes in containers.
+All 34 automated tests and 11 browser workflows pass, along with production build, Deno validation, and a zero-finding production dependency audit. Coverage includes dimensional construction takeoffs, slab/component editing, imports, authentication, locations, customer privacy, reservations/staging/dispatch/receipts, purchasing/allocation, provider shutdown, and Supabase policies/MFA/authorization. Browser tests use an isolated in-memory database and ports 3002/5174, including real slab selection, yard-tag PDF/print visibility, counted receiving, local-only design commands, desktop/mobile layouts, and management/authenticator workflows. The deployed backend passed hosted yard/supply/floor and disabled-AI-route smoke checks with temporary fixtures removed. Software rendering can make the full browser suite take several minutes in containers.
 
 ## Deployment
 
