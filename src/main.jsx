@@ -5,5 +5,7 @@ import './styles.css';
 import './workspace.css';
 import './access.css';
 import './operations.css';
+import './editor.css';
+import './supply.css';
 
 createRoot(document.getElementById('root')).render(<App />);

@@ -63,6 +63,8 @@ const roleDescriptions = {
   manager: "Project portfolio, designs & costs",
   engineer: "Building designs & projects",
   estimator: "Inventory & costs",
+  purchasing: "Purchasing, incoming orders & costs",
+  receiving: "Count arrivals, approve stock & stage orders",
   technician: "Support queue & ticket assignment",
   viewer: "Read-only projects; no costs",
 };

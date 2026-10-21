@@ -53,5 +53,5 @@ export async function parseInventoryFile(file) {
 }
 
 export function inventoryCsv(items) {
-  return Papa.unparse({ fields: ['Part ID', 'Description', 'Category', 'Unit', 'On hand', 'Unit cost USD', 'Reorder point', 'Location', 'Supplier','Inventory location','Held','Available'], data: items.map(item => [item.id, item.name, item.category, item.unit, item.stock, item.price ?? '', item.reorder, item.location || '', item.supplier || '',item.location_id||'MAIN',item.reserved||0,item.available??item.stock]) }, { quotes: true, escapeFormulae: true });
+  return Papa.unparse({ fields: ['Part ID', 'Description', 'Category', 'Unit', 'On hand', 'Unit cost USD', 'Reorder point', 'Location', 'Supplier','Inventory location','Held','Staged','Available'], data: items.map(item => [item.id, item.name, item.category, item.unit, item.stock, item.price ?? '', item.reorder, item.location || '', item.supplier || '',item.location_id||'MAIN',item.held??item.reserved??0,item.staged||0,item.available??item.stock]) }, { quotes: true, escapeFormulae: true });
 }

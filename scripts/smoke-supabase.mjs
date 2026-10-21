@@ -42,8 +42,10 @@ async function removeFixtures(ids, partIds) {
   const fixtureTags=partIds.map(id=>id.replace(/^SMOKE-/,''));
   let orderIds=[];
   if(ids.length){const result=await service.from('stock_orders').select('id').in('created_by',ids);if(result.error)errors.push(`Orders lookup: ${result.error.message}`);else orderIds=result.data.map(order=>order.id);}
+  let purchaseIds=[];
+  if(ids.length){const result=await service.from('purchase_orders').select('id').in('created_by',ids);if(result.error)errors.push(`Purchase lookup: ${result.error.message}`);else purchaseIds=result.data.map(order=>order.id);}
   if(orderIds.length){const result=await service.from('stock_movements').delete().in('order_id',orderIds);if(result.error)errors.push(`Order ledger: ${result.error.message}`);}
-  for(const [table,column,values]of[['stock_movements','part_id',partIds],['stock_orders','id',orderIds],['inventory_balances','part_id',partIds]]){if(!values.length)continue;const result=await service.from(table).delete().in(column,values);if(result.error)errors.push(`${table}: ${result.error.message}`);}
+  for(const [table,column,values]of[['stock_movements','purchase_order_id',purchaseIds],['stock_movements','part_id',partIds],['purchase_receipts','order_id',purchaseIds],['purchase_orders','id',purchaseIds],['stock_orders','id',orderIds],['stock_alerts','part_id',partIds],['inventory_balances','part_id',partIds]]){if(!values.length)continue;const result=await service.from(table).delete().in(column,values);if(result.error)errors.push(`${table}: ${result.error.message}`);}
   for (const [table, column, values] of [['inventory', 'id', partIds], ['tickets', 'reporter', ids], ['projects', 'author', ids], ['audit', 'actor', ids], ['inventory_imports', 'actor', ids], ['profiles', 'id', ids]]) {
     if (!values.length) continue;
     const result = await service.from(table).delete().in(column, values);
@@ -57,7 +59,7 @@ async function removeFixtures(ids, partIds) {
 let failed = false;
 try {
   const accounts = check(await service.auth.admin.listUsers({ page: 1, perPage: 1000 })).users;
-  const fixtures = accounts.filter(account => /^draftai-(?:smoke-(?:admin|viewer|outsider)|blocked)-[a-f0-9]{12}@example\.test$/.test(account.email || ''));
+  const fixtures = accounts.filter(account => /^draftai-(?:smoke-(?:admin|viewer|outsider|purchasing|receiving)|blocked)-[a-f0-9]{12}@example\.test$/.test(account.email || ''));
   const fixtureTags = [...new Set(fixtures.map(account => account.email.match(/-([a-f0-9]{12})@/)?.[1]).filter(Boolean))];
   if (fixtures.length) {
     await removeFixtures(fixtures.map(account => account.id), fixtureTags.map(value => `SMOKE-${value}`));
@@ -68,10 +70,12 @@ try {
   const admin = await temporaryUser('admin');
   const viewer = await temporaryUser('viewer');
   const outsider = await temporaryUser('outsider');
+  const buyer = await temporaryUser('purchasing');
+  const receiver = await temporaryUser('receiving');
   const authenticated = await call(admin.token, '/auth');
   assert.equal(authenticated.status, 200, JSON.stringify(authenticated.data));
   assert.equal(authenticated.data.user.role, 'admin');
-  const item = { id: partId, name: 'Temporary deployment check', category: 'Temporary smoke test', unit: 'ea', stock: 4, price: 12.5, reorder: 1, location: '', supplier: '' };
+  const item = { id: partId, name: 'Temporary deployment check', category: 'Temporary smoke test', unit: 'ea', stock: 4, price: 12.5, reorder: 3, location: '', supplier: '' };
   const saved = await call(admin.token, '/inventory', item);
   assert.equal(saved.status, 200, JSON.stringify(saved.data));
   assert.equal((await call(viewer.token, '/inventory', item)).status, 403);
@@ -92,8 +96,12 @@ try {
   assert.equal((await call(admin.token,`/shipments/${order.data.id}/action`,{action:'hold',revision:1})).status,200);
   let source=(await call(admin.token,'/inventory?location=MAIN')).data.find(part=>part.id===partId);
   assert.equal(source.stock,4);assert.equal(source.available,3);
-  assert.equal((await call(admin.token,`/shipments/${order.data.id}/action`,{action:'dispatch',revision:2})).status,200);
-  assert.equal((await call(admin.token,`/shipments/${order.data.id}/action`,{action:'deliver',revision:3})).status,200);
+  assert.equal((await call(receiver.token,`/shipments/${order.data.id}/action`,{action:'stage',revision:2,yardArea:`Smoke yard ${tag}`})).status,200);
+  source=(await call(admin.token,'/inventory?location=MAIN')).data.find(part=>part.id===partId);
+  assert.equal(source.stock,4);assert.equal(source.staged,1);assert.equal(source.held,0);
+  assert.equal((await call(receiver.token,`/shipments/${order.data.id}/action`,{action:'dispatch',revision:3})).status,403);
+  assert.equal((await call(admin.token,`/shipments/${order.data.id}/action`,{action:'dispatch',revision:3})).status,200);
+  assert.equal((await call(admin.token,`/shipments/${order.data.id}/action`,{action:'deliver',revision:4})).status,200);
   const transfer=await call(admin.token,'/shipments',{requestKey:crypto.randomUUID(),kind:'transfer',sourceLocation:'MAIN',destinationLocation:siteId,customerId:null,lines:[{partId,quantity:2}]});
   assert.equal(transfer.status,200,JSON.stringify(transfer.data));
   for(const [action,revision]of[['hold',1],['dispatch',2]]){const result=await call(admin.token,`/shipments/${transfer.data.id}/action`,{action,revision});assert.equal(result.status,200,JSON.stringify(result.data));}
@@ -102,11 +110,34 @@ try {
   assert.equal(received.status,200,JSON.stringify(received.data));
   assert.equal((await call(admin.token,`/inventory?location=${siteId}`)).data.find(part=>part.id===partId).stock,2);
   assert.equal((await call(viewer.token,'/customers')).status,403);
+  const warning=(await call(buyer.token,'/ordering-board?location=MAIN')).data.find(part=>part.id===partId);
+  assert.equal(warning.suggested,2);
+  assert.equal((await call(buyer.token,`/stock-alerts/${warning.alert_id}/acknowledge`,{episode:warning.episode})).status,200);
+  const purchasePayload={requestKey:crypto.randomUUID(),supplier:'Temporary Vendor',supplierReference:`PO-${tag}`,locationId:'MAIN',lines:[{partId,quantity:2}]};
+  assert.equal((await call(receiver.token,'/purchases',purchasePayload)).status,403);
+  const purchase=await call(buyer.token,'/purchases',purchasePayload);assert.equal(purchase.status,200,JSON.stringify(purchase.data));
+  assert.equal((await call(buyer.token,`/purchases/${purchase.data.id}/action`,{action:'order',revision:1})).status,200);
+  assert.equal((await call(buyer.token,'/ordering-board?location=MAIN')).data.find(part=>part.id===partId).suggested,0);
+  const receipt={requestKey:crypto.randomUUID(),revision:2,deliveryReference:`DEL-${tag}`,lines:[{partId,accepted:1,rejected:1,bin:'Temporary receiving'}]};
+  assert.equal((await call(buyer.token,`/purchases/${purchase.data.id}/receive`,receipt)).status,403);
+  const approved=await call(receiver.token,`/purchases/${purchase.data.id}/receive`,receipt);assert.equal(approved.status,200,JSON.stringify(approved.data));
+  assert.equal((await call(receiver.token,`/purchases/${purchase.data.id}/receive`,receipt)).data.alreadyApplied,true);
+  source=(await call(receiver.token,'/inventory?location=MAIN')).data.find(part=>part.id===partId);assert.equal(source.stock,2);assert.equal(source.price,null);
+  assert.equal((await call(receiver.token,`/purchases/${purchase.data.id}/receive`,{requestKey:crypto.randomUUID(),revision:3,lines:[{partId,accepted:1,rejected:0}]})).status,200);
+  assert.equal((await call(buyer.token,'/ordering-board?location=MAIN')).data.some(part=>part.id===partId),false);
+  const specialOrder=await call(admin.token,'/shipments',{requestKey:crypto.randomUUID(),kind:'customer',sourceLocation:'MAIN',customerId:customer.data.id,reference:`SPECIAL-${tag}`,lines:[{partId,quantity:1}]});assert.equal(specialOrder.status,200,JSON.stringify(specialOrder.data));
+  const special=await call(buyer.token,'/purchases',{...purchasePayload,requestKey:crypto.randomUUID(),linkedOrderId:specialOrder.data.id,lines:[{partId,quantity:1}]});assert.equal(special.status,200,JSON.stringify(special.data));
+  assert.equal((await call(buyer.token,`/purchases/${special.data.id}/action`,{action:'order',revision:1})).status,200);
+  assert.equal((await call(receiver.token,`/purchases/${special.data.id}/receive`,{requestKey:crypto.randomUUID(),revision:2,lines:[{partId,accepted:1,rejected:0}]})).status,200);
+  source=(await call(admin.token,'/inventory?location=MAIN')).data.find(part=>part.id===partId);assert.equal(source.stock,4);assert.equal(source.reserved,1);assert.equal(source.available,3);
+  const specialSaved=(await call(receiver.token,'/shipments')).data.find(order=>order.id===specialOrder.data.id);assert.equal(specialSaved.status,'held');assert.equal(specialSaved.customer_snapshot.name,`Deployment smoke ${tag}`);
+  assert.equal((await call(admin.token,`/shipments/${specialSaved.id}/action`,{action:'cancel',revision:specialSaved.revision})).status,200);
+  assert.ok((await call(receiver.token,'/purchases')).data.find(order=>order.id===purchase.data.id).receipts.length===2);
   const profile=checkedProfile(await call(admin.token,'/auth'));
   const assigned=await call(admin.token,`/users/${admin.id}/profile`,{name:profile.name,email:profile.email,address:profile.address,phone:profile.phone,department:profile.department,jobTitle:profile.jobTitle,locationId:siteId});
   assert.equal(assigned.status,200,JSON.stringify(assigned.data));
   assert.equal((await call(admin.token,'/inventory')).data.find(part=>part.id===partId).stock,2);
-  const project = await call(admin.token, '/projects', { building: { ...defaultBuilding, name: `Deployment check ${tag}` } });
+  const project = await call(admin.token, '/projects', { building: { ...defaultBuilding, floor:{enabled:true,thickness:6,wastePercent:5}, name: `Deployment check ${tag}` } });
   assert.equal(project.status, 200, JSON.stringify(project.data));
   const projectId = project.data.id;
   const updated = await call(admin.token, `/projects/${projectId}/details`, { client: 'Temporary smoke test', location: 'Test site', status: 'Review', owner: admin.id, due_date: '', notes: 'Temporary deployment verification only.', revision: 1 });
@@ -114,6 +145,7 @@ try {
   const projects = await call(admin.token, '/projects');
   assert.equal(projects.status, 200, JSON.stringify(projects.data));
   assert.equal(projects.data.find(item => item.id === projectId).owner, admin.id);
+  assert.equal(projects.data.find(item => item.id === projectId).building.floor.enabled,true);
   assert.equal((await call(viewer.token, '/projects', { building: defaultBuilding })).status, 403);
   const ticket = await call(viewer.token, '/tickets', { title: 'Temporary deployment ticket', description: 'Checking the private support workflow on the deployed function.', category: 'Other', priority: 'Normal', project_id: projectId });
   assert.equal(ticket.status, 201, JSON.stringify(ticket.data));
@@ -129,7 +161,7 @@ try {
   const signup = await anonymous.auth.signUp({ email: `draftai-blocked-${tag}@example.test`, password: randomBytes(24).toString('base64url') });
   if (signup.data?.user) identities.push(signup.data.user.id);
   assert.ok(signup.error, 'Public signup must be disabled.');
-  console.log('PASS: hosted Auth, managed sites, employee-default inventory, delivery holds, dispatch/receipt, customer privacy, projects, tickets, cost/contact privacy, and disabled public signup.');
+  console.log('PASS: hosted Auth, sites, yard staging, low-stock warnings, purchasing/receiving permissions, partial counted receipts/rejects, replay safety, special-order allocation, shipment movements, concrete-floor persistence, projects/tickets, privacy, and disabled signup.');
 } catch (error) {
   failed = true;
   console.error(`FAIL: ${error.message}`);

@@ -4,6 +4,42 @@ import { createApp } from '../server/index.js';
 import { provisionInitialAdmin } from '../server/accounts.js';
 import { randomUUID } from 'node:crypto';
 
+test('purchasing and receiving roles keep counted arrivals idempotent and customer special orders allocated',async()=>{
+  const {app,db}=createApp({databasePath:':memory:'});await provisionInitialAdmin(db,{name:'Supply Admin',email:'supply@test.com',password:'supply-test-password'});
+  const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));const base=`http://127.0.0.1:${server.address().port}/api`;let cookie='';
+  async function request(path,body,session=cookie){const response=await fetch(`${base}${path}`,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',Cookie:session},...(body===undefined?{}:{body:JSON.stringify(body)})});return {status:response.status,data:await response.json(),cookie:response.headers.get('set-cookie')?.split(';')[0]};}
+  try{
+    cookie=(await request('/auth/login',{email:'supply@test.com',password:'supply-test-password'})).cookie;
+    for(const role of ['purchasing','receiving'])assert.equal((await request('/users',{name:`Supply ${role}`,email:`${role}@test.com`,password:'supply-worker-password',role,locationId:'MAIN'})).status,201);
+    const buyer=(await request('/auth/login',{email:'purchasing@test.com',password:'supply-worker-password'})).cookie;
+    const receiver=(await request('/auth/login',{email:'receiving@test.com',password:'supply-worker-password'})).cookie;
+    assert.equal((await request('/inventory',{id:'SUP-1',name:'Special frame',category:'Steel',unit:'ea',stock:0,price:12,reorder:5,location:'',supplier:'Vendor',location_id:'MAIN'})).status,200);
+    const address={line1:'Customer Road',city:'Audubon',region:'IA',postalCode:'50025',country:'US'};
+    const customer=(await request('/customers',{name:'Special Farm',contactName:'Farm Owner',phone:'555-0100',billingAddress:address,shippingAddress:address})).data;assert.ok(customer.id,JSON.stringify(customer));
+    const shipment=(await request('/shipments',{requestKey:randomUUID(),kind:'customer',sourceLocation:'MAIN',customerId:customer.id,reference:'SPECIAL-1',lines:[{partId:'SUP-1',quantity:3}]})).data;
+    assert.ok(shipment.id,JSON.stringify(shipment));
+    const purchase={requestKey:randomUUID(),supplier:'Vendor',supplierReference:'PO-1',locationId:'MAIN',linkedOrderId:shipment.id,lines:[{partId:'SUP-1',quantity:3}]};
+    assert.equal((await request('/purchases',purchase,receiver)).status,403);
+    const saved=await request('/purchases',purchase,buyer);assert.equal(saved.status,200);const id=saved.data.id;
+    assert.equal((await request(`/purchases/${id}/action`,{action:'order',revision:1},buyer)).status,200);
+    const receipt={requestKey:randomUUID(),revision:2,deliveryReference:'TRUCK-1',lines:[{partId:'SUP-1',accepted:2,rejected:1,bin:'Rack 3'}]};
+    assert.equal((await request(`/purchases/${id}/receive`,receipt,buyer)).status,403);
+    assert.equal((await request(`/purchases/${id}/receive`,receipt,receiver)).status,200);
+    assert.equal((await request(`/purchases/${id}/receive`,receipt,receiver)).data.alreadyApplied,true);
+    let balance=(await request('/inventory')).data.find(item=>item.id==='SUP-1');assert.equal(balance.stock,2);assert.equal(balance.reserved,2);assert.equal(balance.available,0);
+    assert.equal((await request('/inventory',undefined,receiver)).data.find(item=>item.id==='SUP-1').price,null);
+    assert.equal((await request(`/purchases/${id}/receive`,{...receipt,requestKey:randomUUID(),revision:3,lines:[{partId:'SUP-1',accepted:2,rejected:0}]},receiver)).status,409);
+    assert.equal((await request(`/purchases/${id}/receive`,{...receipt,requestKey:randomUUID(),revision:3,lines:[{partId:'SUP-1',accepted:1,rejected:0}]},receiver)).status,200);
+    let order=(await request('/shipments',undefined,receiver)).data.find(order=>order.id===shipment.id);assert.equal(order.status,'held');assert.equal(order.customer_snapshot.name,'Special Farm');
+    assert.equal((await request(`/shipments/${order.id}/action`,{action:'stage',revision:order.revision,yardArea:'South / Row 2'},receiver)).status,200);
+    balance=(await request('/inventory')).data.find(item=>item.id==='SUP-1');assert.equal(balance.stock,3);assert.equal(balance.staged,3);assert.equal(balance.held,0);
+    order=(await request('/shipments')).data.find(order=>order.id===shipment.id);
+    assert.equal((await request(`/shipments/${order.id}/action`,{action:'dispatch',revision:order.revision},receiver)).status,403);
+    assert.equal((await request(`/shipments/${order.id}/action`,{action:'cancel',revision:order.revision})).status,200);
+    balance=(await request('/inventory')).data.find(item=>item.id==='SUP-1');assert.equal(balance.stock,3);assert.equal(balance.available,3);assert.equal(balance.staged,0);
+  }finally{await new Promise(resolve=>server.close(resolve));db.close();}
+});
+
 test('employees default to their location and customers/shipments preserve audited stock and address snapshots',async()=>{
   const {app,db}=createApp({databasePath:':memory:'});await provisionInitialAdmin(db,{name:'Operations Admin',email:'operations@test.com',password:'operations-test-password'});
   const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));const base=`http://127.0.0.1:${server.address().port}/api`;let cookie='';

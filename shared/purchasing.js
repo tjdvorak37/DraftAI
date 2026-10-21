@@ -1,0 +1,8 @@
+import { z } from 'zod';
+import { locationCode } from './operations.js';
+
+export const purchasingRoles=['admin','manager','estimator','purchasing'];
+export const receivingRoles=['admin','manager','estimator','receiving'];
+export const supplyReadRoles=[...new Set([...purchasingRoles,...receivingRoles])];
+export const purchaseSchema=z.object({requestKey:z.uuid(),supplier:z.string().trim().min(1).max(160),supplierReference:z.string().trim().max(120).default(''),locationId:locationCode,linkedOrderId:z.uuid().nullable().default(null),expectedDate:z.union([z.iso.date(),z.literal('')]).default(''),notes:z.string().max(5000).default(''),lines:z.array(z.object({partId:z.string().min(1).max(64),quantity:z.number().positive().max(1e9)})).min(1).max(100)}).superRefine((order,context)=>{if(new Set(order.lines.map(line=>line.partId)).size!==order.lines.length)context.addIssue({code:'custom',message:'Combine duplicate parts into one purchase line.'});});
+export const receiptSchema=z.object({requestKey:z.uuid(),revision:z.number().int().positive(),deliveryReference:z.string().trim().max(120).default(''),notes:z.string().max(5000).default(''),lines:z.array(z.object({partId:z.string().min(1).max(64),accepted:z.number().min(0).max(1e9),rejected:z.number().min(0).max(1e9),bin:z.string().max(160).default('')})).min(1).max(100)}).superRefine((receipt,context)=>{if(new Set(receipt.lines.map(line=>line.partId)).size!==receipt.lines.length)context.addIssue({code:'custom',message:'Count each part only once per receipt.'});if(!receipt.lines.some(line=>line.accepted+line.rejected>0))context.addIssue({code:'custom',message:'Enter at least one counted material quantity.'});});

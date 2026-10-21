@@ -20,8 +20,23 @@ export function measurementInFeet(text) {
 }
 
 export function parseDesignChanges(input, building, context = null) {
-  const text = input.replace(/[′’]/g, "'").replace(/[″“”]/g, '"').replace(/\bsouth[ -]?east\b/gi, 'southeast').replace(/\bnorth[ -]?east\b/gi, 'northeast');
+  const text = input.replace(/[′’]/g, "'").replace(/[″“”]/g, '"').replace(/\bsouth[ -]?east\b/gi, 'southeast').replace(/\bnorth[ -]?east\b/gi, 'northeast').replace(/(\d)\s*-\s*(inch(?:es)?|feet|foot|ft)\b/gi,'$1 $2');
   const changes = {};
+  const floorRequest = /\b(?:concrete\s+(?:floor|slab)|(?:floor|slab)\s*(?:thickness|concrete)|slab)\b/i.test(text)||/\b(?:remove|delete|without|no)\s+(?:the\s+)?floor\b/i.test(text);
+  if (floorRequest) {
+    if (/\b(rebar|reinforcement|reinforced|wire\s*mesh|load\s*capacity)\b/i.test(text)) throw new ClarificationError('I can add and size the concrete floor geometrically, but reinforcement and load design are not available. Specify the slab thickness separately and have its engineering requirements reviewed. Nothing has changed.');
+    if (pairPattern.test(text)) throw new ClarificationError('The concrete floor currently follows the full building footprint. Set building width/length for its footprint and specify slab thickness in inches or feet. Partial floor areas are not modeled yet.');
+    const floor = { ...building.floor, enabled: !/\b(remove|delete|without|no)\b/i.test(text) };
+    if(/-\s*\d/.test(text))throw new ClarificationError('Slab thickness must be a positive measurement, such as 4 inches. Nothing has changed.');
+    const thickness = text.match(new RegExp(`(?:floor|slab)\\s*(?:thickness)?\\s*(?:to|of|at|is|=|a)?\\s*(${measurement})`, 'i')) || text.match(new RegExp(`(${measurement})\\s*(?:thick\\s*)?(?:concrete\\s*)?(?:floor|slab)`, 'i'));
+    if (thickness) {
+      if (!/feet|foot|ft|inches|inch|in|['"]/i.test(thickness[1])) throw new ClarificationError('Include the slab thickness unit, such as "concrete floor thickness 6 inches".');
+      floor.thickness = measurementInFeet(thickness[1]) * 12;
+    }
+    const allowance = text.match(/\b(?:waste|allowance)\s*(?:to|of|at|=)?\s*(\d+(?:\.\d+)?)\s*%/i);
+    if (allowance) floor.wastePercent = Number(allowance[1]);
+    changes.floor = floor;
+  }
   const construction = { ...building.construction };
   let constructionRequested = false;
   if (/\b(?:use|add|enable)\s+(?:the\s+)?concrete\s+(?:stem\s*)?walls?\b/i.test(text)) { construction.wallMode = 'concrete'; constructionRequested = true; }

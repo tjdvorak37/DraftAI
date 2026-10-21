@@ -6,6 +6,8 @@ A working full-stack application for configuring fabric-covered steel buildings,
 
 **Inventory operations:** managed sites, employee-default inventory views, per-site balances/holds, customer accounts, delivery shipments, transfers, and stock movement history are implemented. See [docs/INVENTORY_OPERATIONS.md](docs/INVENTORY_OPERATIONS.md) for workflows, permissions, count/import conventions, and limitations. Existing stock is preserved in `MAIN` (Primary location).
 
+**Yard and supply update:** yard staging and printable customer/order/location sheets; separate on-hand, held, staged, and available quantities; persistent in-app shortages; Ordering and Receiving queues; partial counted purchase receipts/rejects; and customer special-order allocation. The new DraftAI migration/function are deployed and hosted smoke-tested; the matching frontend is included in this release. Supplier ordering and notification delivery are not automated.
+
 **New functional slice:** terrain-aware concrete wall layouts now change column-leg lengths, side-girt lengths, covering areas, and geometric cut/fill quantities. Open **Site & openings** to configure the layout and **Construction schedule** to inspect/export the calculated lengths and wall sections. Follow [the construction test guide](docs/CONSTRUCTION_TESTING.md) for an exact repeatable hillside case. These dimensional calculations do not constitute structural approval or a complete fabrication list.
 
 ## Run
@@ -26,6 +28,7 @@ The first screen is **Sign in**, with no public signup or guest workspace. Manag
 - Manual **Site & openings** controls for an east-wall window, terrain profile, finished-floor elevation, concrete-wall dimensions, column-base treatment, and explicit fill material/factor. Inputs are saved with projects and JSON exports. Geometry drives dimensional takeoffs; structural suitability and survey accuracy are not established.
 - Shared concrete wall/covering profiles, location-specific column-leg schedules, clipped/interrupted girt layouts, concrete and cut/fill volumes, and a downloadable construction CSV. Adapted assemblies remain unpriced until entered in Inventory, including cubic-yard unit costs. These are not fabrication-released schedules or full structural/member/stock optimization.
 - Orbit, zoom, pan, plan/elevation cameras, cutaway, wireframe, dimensions, grid, component inspection, and undo/redo.
+- Optional full-footprint concrete floor with explicit thickness and waste allowance, 3D slab selection, and editable component-group properties through **Components** or a selected assembly. Typed examples include `add a concrete floor` and `add a 4-inch concrete floor`. The bare command proposes a clearly labeled draft 6-inch thickness and 5% allowance. Floor quantities are geometric, not reinforcement/foundation engineering; component editing is supported assembly parameters, not arbitrary member/bolt CAD.
 - Preliminary catalog-driven material quantities, extended costs, unpriced custom door line, and CSV export. Unknown costs remain `null`, not zero. Unit costs retain cents.
 - Workspace inventory with search, categories, stock/reorder thresholds, editable unit costs, custom parts, stock valuation, and CSV export. Custom catalog parts are inventory entries, not automatically included in a building or modeled in 3D.
 - CSV/XLSX bulk inventory import with worksheet selection, automatic/custom column mapping, add/update modes, custom categories/units, counts, costs, reorder points, locations, and suppliers. Preview performs no inventory writes; apply is explicit, transactional, audited, conflict-checked, and non-replayable. Duplicate/invalid rows block import. Up to 5,000 rows per sheet, 100 columns, and 8 MB source file. Imported parts do not automatically become modeled building assemblies.
@@ -47,6 +50,8 @@ Provision the initial administrator privately as described above. Open **Admin â
 | Manager | Yes | Yes | Yes | No | No |
 | Engineer | Yes | Yes | Yes | No | No |
 | Estimator | Yes | No | Yes | Yes | No |
+| Purchasing | Yes | No | Yes | No | No |
+| Receiving | Yes | No | No | No | No |
 | Technician | Yes | No | No | No | No |
 | Viewer | Yes | No | No | No | No |
 
@@ -123,7 +128,7 @@ npx playwright install --with-deps chromium
 npm run test:e2e
 ```
 
-Twenty-six automated tests cover the model, dimensional construction takeoffs, imports, authentication, managed profiles/sites, customer privacy, atomic reservations/dispatch/receipts, inventory transactions, Supabase policies/MFA/authorization, and existing project/ticket workflows. Seven browser workflows use a separate in-memory database and ports 3002/5174; they do not modify your real workspace. They exercise login-first access, drafting, construction, CSV/XLSX imports, customer details, shipping/transfer states, employee-default stock views, management, projects, tickets, and authenticator sign-in on desktop/mobile. All pass. The Deno function check and dependency audit also pass. Hosted smoke tests independently verify deployed operations with temporary records removed afterward. Software rendering can make the full browser suite take several minutes in containers.
+All 33 automated tests and 10 browser workflows pass, along with production build, Deno validation, and a zero-finding production dependency audit. Coverage includes dimensional construction takeoffs, slab/component editing, imports, authentication, locations, customer privacy, reservations/staging/dispatch/receipts, purchasing/allocation, and Supabase policies/MFA/authorization. Browser tests use an isolated in-memory database and ports 3002/5174, including real slab selection, yard-tag PDF/print visibility, counted receiving, desktop/mobile layouts, and management/authenticator workflows. The deployed backend also passed hosted yard/supply/floor smoke checks with temporary fixtures removed. Software rendering can make the full browser suite take several minutes in containers.
 
 ## Deployment
 
