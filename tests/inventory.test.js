@@ -70,7 +70,7 @@ test('bulk import is role-protected, previewed, atomic, conflict-safe, audited, 
     assert.equal((await request('/inventory/import/commit', { previewId: preview.data.previewId })).status, 409);
     assert.equal(db.prepare("SELECT category FROM inventory WHERE id='AC/001'").get().category, 'Fabrication supplies');
     const pending = await request('/inventory/import/preview', { ...input, rows: [['AC/001', 'Changed clamp', '99'], ['AC/003', 'New clamp', '3']] });
-    db.prepare("UPDATE inventory SET stock=12 WHERE id='AC/001'").run();
+    db.prepare("UPDATE inventory_balances SET stock=12 WHERE part_id='AC/001' AND location_id='MAIN'").run();
     assert.equal((await request('/inventory/import/commit', { previewId: pending.data.previewId })).status, 409);
     assert.equal(db.prepare("SELECT id FROM inventory WHERE id='AC/003'").get(), undefined);
     const invalid = await request('/inventory/import/preview', { ...input, rows: [rows[0], ['INVALID', 'Bad', '-10']] });

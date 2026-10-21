@@ -6,7 +6,8 @@ import { download } from './files.js';
 import { inventoryFields, guessInventoryMapping } from '../shared/inventory.js';
 import { inventoryCsv, parseInventoryFile } from './inventoryFiles.js';
 
-export default function InventoryImport({ inventory, onClose, onImported }) {
+export default function InventoryImport({ inventory, onClose, onImported,locations=[],locationId='MAIN' }) {
+  const [targetLocation,setTargetLocation]=useState(locationId==='all'?'MAIN':locationId);
   const [sheets, setSheets] = useState([]);
   const [selected, setSelected] = useState(0);
   const [fileName, setFileName] = useState('');
@@ -26,18 +27,20 @@ export default function InventoryImport({ inventory, onClose, onImported }) {
   }
   async function prepare() {
     setBusy(true); setError(''); setConfirmed(false);
-    try { setPreview(await api('/inventory/import/preview', { headers: sheet.headers, rows: sheet.rows, mapping, mode, fileName })); }
+    try { setPreview(await api('/inventory/import/preview', { headers: sheet.headers, rows: sheet.rows, mapping, mode, fileName,locationId:targetLocation })); }
     catch (error) { setError(error.message); } finally { setBusy(false); }
   }
   async function commit() {
     if (!confirmed || !preview?.previewId) return;
     setBusy(true); setError('');
-    try { const result = await api('/inventory/import/commit', { previewId: preview.previewId }); await onImported(result); }
+    try { const result = await api('/inventory/import/commit', { previewId: preview.previewId }); await onImported({...result,locationId:targetLocation}); }
     catch (error) { setError(error.message); setPreview(null); setConfirmed(false); } finally { setBusy(false); }
   }
   return <Modal wide title="Import inventory" subtitle="CSV or Excel · preview every change before applying." onClose={onClose}>
     <div className="inventory-import-content form-stack">
       {!preview ? <>
+        <label>Import into location<select aria-label="Inventory import location" value={targetLocation} onChange={event=>setTargetLocation(event.target.value)} disabled={busy}>{locations.filter(location=>location.active).map(location=><option key={location.id} value={location.id}>{location.name}</option>)}</select></label>
+        <p className="muted">Counts and bin assignments apply only to this site. Descriptions, categories, units, and unit costs are shared by the part catalog. Import one location at a time.</p>
         <label className="upload-zone" onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); load(event.dataTransfer.files[0]); }}><FileUp size={29} /><strong>{busy ? 'Reading inventory…' : fileName || 'Choose inventory file'}</strong><span>CSV / XLSX · 8 MB · up to 5,000 rows per sheet</span><input type="file" accept=".csv,.xlsx" aria-label="Choose inventory import file" disabled={busy} onChange={event => load(event.target.files[0])} /></label>
         <div className="import-file-actions"><button className="button compact" onClick={() => download('inventory-template.csv', inventoryCsv([{ id: 'YOUR-SKU-001', name: 'Your component', category: 'Your category', unit: 'ea', stock: 0, price: null, reorder: 0, location: '', supplier: '' }]), 'text/csv')}><Download size={13} /> Download template</button><button className="button compact" onClick={() => download('inventory-before-import.csv', inventoryCsv(inventory), 'text/csv')}><Download size={13} /> Export current inventory</button></div>
         {sheet && <>

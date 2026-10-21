@@ -1,0 +1,55 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+
+test('location stock, delivery holds, dispatch, receipt, cancellation, and customer privacy are transactional', async () => {
+  const db = new PGlite();
+  const admin = '00000000-0000-4000-8000-000000000001';
+  const viewer = '00000000-0000-4000-8000-000000000002';
+  try {
+    await db.exec(`create role anon; create role authenticated; create role service_role bypassrls; create schema auth;
+      create table auth.users(id uuid primary key); create table auth.mfa_factors(user_id uuid,status text);
+      create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
+      create function auth.jwt() returns jsonb language sql stable as $$ select '{"aal":"aal2"}'::jsonb $$;
+      grant usage on schema auth to authenticated; grant execute on function auth.uid(),auth.jwt() to authenticated;
+      insert into auth.users values('${admin}'),('${viewer}');`);
+    for (const file of ['202610200001_workspace.sql','202610200002_inventory_operations.sql']) await db.exec(await readFile(new URL(`../supabase/migrations/${file}`, import.meta.url),'utf8'));
+    await db.exec(`insert into profiles(id,name,email,role) values('${admin}','Admin User','admin@test.com','admin'),('${viewer}','Viewer User','viewer@test.com','viewer');
+      insert into locations(id,name) values('WEST','West warehouse'); set role authenticated; select set_config('request.jwt.claim.sub','${admin}',false);`);
+    const item = { id: 'P-1', name: 'Steel panel', category: 'Steel', unit: 'ea', stock: 10, price: 25, reorder: 2, location: 'Bin A', supplier: '', location_id: 'MAIN' };
+    await db.query('select save_inventory($1::jsonb)',[JSON.stringify(item)]);
+    await assert.rejects(()=>db.query('select create_stock_order($1::jsonb)',[JSON.stringify({requestKey:'00000000-0000-4000-8000-000000000019',kind:'transfer',sourceLocation:'MAIN',destinationLocation:'WEST'})]),/1-100 inventory lines/);
+    const create = async (quantity, requestKey) => (await db.query('select create_stock_order($1::jsonb) id',[JSON.stringify({ requestKey, kind:'transfer',sourceLocation:'MAIN',destinationLocation:'WEST',lines:[{partId:'P-1',quantity}] })])).rows[0].id;
+    const first = await create(6,'00000000-0000-4000-8000-000000000010');
+    assert.equal(await create(6,'00000000-0000-4000-8000-000000000010'),first);
+    const second = await create(6,'00000000-0000-4000-8000-000000000011');
+    const transition = (id,action,revision) => db.query('select transition_stock_order($1,$2,$3)',[id,action,revision]);
+    await transition(first,'hold',1);
+    const main = (await db.query("select inventory_listing('MAIN') items")).rows[0].items[0];
+    assert.equal(main.stock,10); assert.equal(main.reserved,6); assert.equal(main.available,4);
+    await assert.rejects(()=>transition(second,'hold',1),/Insufficient/);
+    await assert.rejects(()=>db.query('select save_inventory($1::jsonb)',[JSON.stringify({...item,stock:5})]),/lower than materials/);
+    await transition(first,'dispatch',2);
+    assert.equal((await db.query("select inventory_listing('MAIN') items")).rows[0].items[0].stock,4);
+    assert.equal((await db.query("select inventory_listing('WEST') items")).rows[0].items.length,0);
+    await transition(first,'receive',3);
+    assert.equal((await db.query("select inventory_listing('WEST') items")).rows[0].items[0].stock,6);
+    await assert.rejects(()=>transition(first,'receive',3),/changed/);
+    await assert.rejects(()=>transition(first,'cancel',4),/not valid/);
+    const cancel = await create(3,'00000000-0000-4000-8000-000000000012');
+    await transition(cancel,'hold',1); await transition(cancel,'cancel',2);
+    assert.equal((await db.query("select inventory_listing('MAIN') items")).rows[0].items[0].available,4);
+    assert.equal((await db.query("select stock from inventory where id='P-1'")).rows[0].stock,'10');
+    await assert.rejects(()=>db.query('select save_location($1::jsonb)',[JSON.stringify({id:'WEST',name:'West warehouse',active:false})]),/Move active/);
+    assert.equal((await db.query('select unit from stock_order_lines where order_id=$1',[first])).rows[0].unit,'ea');
+    await db.exec(`reset role; insert into customers(name,shipping_address,notes) values('Test Farm','{"line1":"Private shipping address"}','Private account notes');
+      set role authenticated; select set_config('request.jwt.claim.sub','${viewer}',false);`);
+    assert.equal((await db.query('select * from customers')).rows.length,0);
+    assert.equal((await db.query('select * from stock_orders')).rows.length,0);
+    assert.equal((await db.query("select inventory_listing('MAIN') items")).rows[0].items[0].price,null);
+    await assert.rejects(()=>transition(second,'hold',1),/does not permit/);
+    await db.exec('reset role; set role anon');
+    await assert.rejects(()=>db.query('select * from inventory_balances'),/permission denied/);
+  } finally { await db.close(); }
+});

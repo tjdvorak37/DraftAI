@@ -4,5 +4,6 @@ import App from './App.jsx';
 import './styles.css';
 import './workspace.css';
 import './access.css';
+import './operations.css';
 
 createRoot(document.getElementById('root')).render(<App />);

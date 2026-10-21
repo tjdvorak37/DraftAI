@@ -4,7 +4,7 @@
 
 This repository now contains a Supabase backend option: Auth with optional authenticator MFA, management-created staff profiles, Postgres row-level security, an authenticated Edge Function for privileged operations, and transactional inventory imports. The frontend's production default is Supabase. Express/SQLite remains available for local development and automated tests only.
 
-**Deployment status for this workspace:** the DraftAI project `vheobwhpufrubdfantex` is linked; migration `202610200001_workspace.sql` is applied; `workspace-api` is deployed; email/password login is enabled and global public signup is disabled. Hosted smoke tests verify authentication, permissions, and data isolation with temporary records that are removed afterward. The AWS frontend origin, Amplify deployment, and the owner's permanent initial administrator still need completing. The steps below remain the reference for a new installation.
+**Deployment status for this workspace:** the DraftAI project `vheobwhpufrubdfantex` is linked; migrations `202610200001_workspace.sql` and `202610200002_inventory_operations.sql` are applied; `workspace-api` is deployed; email/password login is enabled and global public signup is disabled. The AWS frontend origin https://main.d1dq7mzpn9g8pz.amplifyapp.com is authorized. Hosted smoke tests verify authentication, inventory locations, customers, shipment movements, permissions, and privacy with temporary records removed afterward. Permanent administrator credentials remain private/operator-managed. The steps below remain the reference for a new installation.
 
 This guide assumes the new Supabase project is empty, as confirmed by the project owner. Do not run the initial migration against another application's database. Review the SQL before applying it. The migration deliberately does not seed illustrative inventory: real inventory starts empty and can be imported.
 
@@ -21,9 +21,11 @@ An Auth account alone cannot enter the app: it also needs an active, management-
 
 ## 2. Apply The Database Migration
 
-For the first setup, open Supabase **SQL Editor**, create a query, and run the complete contents of:
+For a new, empty project, open Supabase **SQL Editor** and run the complete migrations in this order:
 
 [supabase/migrations/202610200001_workspace.sql](../supabase/migrations/202610200001_workspace.sql)
+
+[supabase/migrations/202610200002_inventory_operations.sql](../supabase/migrations/202610200002_inventory_operations.sql)
 
 Run it once. It creates tables, policies, and functions inside a transaction; it is not a destructive reset or an idempotent script. On an error the transaction must roll back; fix the cause instead of dropping existing data.
 

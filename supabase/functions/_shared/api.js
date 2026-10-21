@@ -2,11 +2,12 @@ import { z } from 'zod';
 import { buildingSchema, parseDesignCommand } from '../../../shared/model.js';
 import { inventoryItemSchema, inventoryFields, previewInventoryImport } from '../../../shared/inventory.js';
 import { roles, designRoles, costRoles, supportRoles, projectStatuses, ticketStatuses, ticketPriorities } from '../../../shared/access.js';
+import { routeOperations } from './operations.js';
 
-const profileSchema = z.object({ name: z.string().trim().min(2).max(80), email: z.email().max(254).transform(value => value.toLowerCase()), address: z.string().max(500).default(''), phone: z.string().max(40).default(''), department: z.string().max(80).default(''), jobTitle: z.string().max(80).default('') });
+const profileSchema = z.object({ name: z.string().trim().min(2).max(80), email: z.email().max(254).transform(value => value.toLowerCase()), address: z.string().max(500).default(''), phone: z.string().max(40).default(''), department: z.string().max(80).default(''), jobTitle: z.string().max(80).default(''), locationId:z.string().regex(/^[A-Z0-9][A-Z0-9_-]{0,23}$/).default('MAIN') });
 const creationSchema = profileSchema.extend({ password: z.string().min(12).max(72), role: z.enum(roles) });
-const profileInput = data => ({ name: data.name, email: data.email, address: data.address, phone: data.phone, department: data.department, job_title: data.jobTitle });
-const publicProfile = (profile, factors = []) => ({ ...profile, jobTitle: profile.job_title, twoFactor: factors.some(factor => factor.factor_type === 'totp' && factor.status === 'verified') });
+const profileInput = data => ({ name: data.name, email: data.email, address: data.address, phone: data.phone, department: data.department, job_title: data.jobTitle, location_id:data.locationId });
+const publicProfile = (profile, factors = []) => ({ ...profile, jobTitle: profile.job_title, locationId:profile.location_id, twoFactor: factors.some(factor => factor.factor_type === 'totp' && factor.status === 'verified') });
 const failure = (message, status = 400, extra = {}) => Object.assign(new Error(message), { status, ...extra });
 function checked(result) { if (result.error) throw failure(result.error.message, result.error.code === '42501' ? 403 : 400); return result.data; }
 async function allRows(client, table, columns = '*') {
@@ -58,7 +59,8 @@ export function createWorkspaceHandler({ createClient, env, fetchProvider = fetc
       const source = await request.text();
       if (source.length > 10 * 1024 * 1024) throw failure('Request exceeds 10 MB.', 413);
       const input = JSON.parse(source);
-      const path = input.path;
+      const incomingPath = typeof input.path==='string' ? new URL(input.path,'https://workspace.internal') : null;
+      const path = incomingPath?.pathname;
       const method = input.method || 'GET';
       const body = input.body || {};
       if (typeof path !== 'string' || !['GET', 'POST'].includes(method)) throw failure('Invalid request.');
@@ -76,25 +78,24 @@ export function createWorkspaceHandler({ createClient, env, fetchProvider = fetc
         return { ...value, model: value.model || env('OPENAI_MODEL') || 'gpt-4o-mini', enabled: value.enabled !== false, key: value.encryptedKey ? await decrypt(value.encryptedKey, env('WORKSPACE_ENCRYPTION_KEY')) : env('OPENAI_API_KEY') || '' };
       };
       const workspace = async () => ({ ...(await setting('general') || { name: 'Accu-Steel workspace', supportEmail: '' }), aiConnected: Boolean((await aiSettings()).key && (await aiSettings()).enabled) });
-      const inventory = async () => {
-        const items = await allRows(user, 'inventory');
-        const costs = costRoles.includes(profile.role) ? new Map((await allRows(user, 'inventory_costs')).map(item => [item.id, item.price])) : new Map();
-        return items.map(item => ({ ...item, price: costs.get(item.id) ?? null }));
-      };
+      const inventory = async (location=profile.location_id||'MAIN',flat=false) => checked(await user.rpc('inventory_listing',{p_location:location,p_flat:flat}));
       const directory = async () => checked(await service.from('profiles').select('id,name,role').eq('disabled', false));
+      const operations=await routeOperations({path,method,body,service,user,identity,profile,permit,checked,audit,failure});
+      if(operations)return respond(operations.data);
       if (path === '/auth' && method === 'GET') return respond({ user: publicProfile(profile, identity.factors), aiConnected: (await workspace()).aiConnected, setupRequired: false });
       if (path === '/auth/register') throw failure('Public registration is disabled. Management provisions all accounts.', 403);
       if (path === '/workspace' && method === 'GET') return respond(await workspace());
-      if (path === '/inventory' && method === 'GET') return respond(await inventory());
-      if (path === '/inventory' && method === 'POST') { permit(['admin', 'estimator']); const item = inventoryItemSchema.parse(body); checked(await user.rpc('save_inventory', { item })); return respond({ ok: true }); }
+      if (path === '/inventory' && method === 'GET') return respond(await inventory(incomingPath.searchParams.get('location')||profile.location_id||'MAIN',incomingPath.searchParams.get('flat')==='true'));
+      if (path === '/inventory' && method === 'POST') { permit(['admin', 'estimator']); const item = inventoryItemSchema.parse({...body,location_id:body.location_id||profile.location_id||'MAIN'}); checked(await user.rpc('save_inventory', { item })); return respond({ ok: true }); }
       if (path === '/inventory/import/preview' && method === 'POST') {
         permit(['admin', 'estimator']);
-        const schema = z.object({ headers: z.array(z.string().max(200)).min(1).max(100), rows: z.array(z.array(z.union([z.string().max(2000), z.number().finite(), z.boolean(), z.null()])).max(100)).min(1).max(5000), mapping: z.object(Object.fromEntries(inventoryFields.map(field => [field.id, z.number().int().min(-1).max(99).default(-1)]))), mode: z.enum(['add', 'update', 'upsert']), fileName: z.string().max(200) });
+        const schema = z.object({ headers: z.array(z.string().max(200)).min(1).max(100), rows: z.array(z.array(z.union([z.string().max(2000), z.number().finite(), z.boolean(), z.null()])).max(100)).min(1).max(5000), mapping: z.object(Object.fromEntries(inventoryFields.map(field => [field.id, z.number().int().min(-1).max(99).default(-1)]))), mode: z.enum(['add', 'update', 'upsert']), fileName: z.string().max(200),locationId:z.string().regex(/^[A-Z0-9][A-Z0-9_-]{0,23}$/).default(profile.location_id||'MAIN') });
         const data = schema.parse(body);
-        const preview = previewInventoryImport(data, await inventory());
+        const current=await inventory(data.locationId);
+        const preview = previewInventoryImport(data,current,await inventory('all'));
         let previewId = null;
         if (!preview.counts.error && preview.counts.add + preview.counts.update) {
-          const result = checked(await service.from('inventory_imports').insert({ actor: identity.id, expires: new Date(Date.now() + 900000).toISOString(), payload: { fileName: data.fileName, counts: preview.counts, rows: preview.rows.filter(row => ['add','update'].includes(row.action)).map(row => ({ item: row.item, before: row.before })) } }).select('id').single());
+          const result = checked(await service.from('inventory_imports').insert({ actor: identity.id, expires: new Date(Date.now() + 900000).toISOString(), payload: { fileName: data.fileName, counts: preview.counts, rows: preview.rows.filter(row => ['add','update'].includes(row.action)).map(row => ({ item: row.item, before:row.before ? inventoryItemSchema.parse(row.before) : null })) } }).select('id').single());
           previewId = result.id;
         }
         return respond({ ...preview, previewId });
@@ -137,6 +138,7 @@ export function createWorkspaceHandler({ createClient, env, fetchProvider = fetc
       }
       if (path === '/users' && method === 'POST') {
         permit(['admin']); const data = creationSchema.parse(body);
+        if(!checked(await service.from('locations').select('id').eq('id',data.locationId).eq('active',true).maybeSingle()))throw failure('Choose an active work location.');
         const created = checked(await service.auth.admin.createUser({ email: data.email, password: data.password, email_confirm: true }));
         const saved = await service.from('profiles').insert({ id: created.user.id, ...profileInput(data), role: data.role });
         if (saved.error) { await service.auth.admin.deleteUser(created.user.id); throw failure(saved.error.message); }
@@ -155,6 +157,7 @@ export function createWorkspaceHandler({ createClient, env, fetchProvider = fetc
           await audit('user.access.update', { id, ...data }); return respond({ ok: true });
         }
         const data = profileSchema.parse(body);
+        if(!checked(await service.from('locations').select('id').eq('id',data.locationId).eq('active',true).maybeSingle()))throw failure('Choose an active work location.');
         if (data.email !== current.email) checked(await service.auth.admin.updateUserById(id, { email: data.email, email_confirm: true }));
         checked(await service.from('profiles').update(profileInput(data)).eq('id', id));
         await audit('user.profile.update', { id, fields: Object.keys(profileInput(data)) }); return respond({ user: publicProfile({ ...current, ...profileInput(data) }), requiresSignIn: id === identity.id && data.email !== current.email });
